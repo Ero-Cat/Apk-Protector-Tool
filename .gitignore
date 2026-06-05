@@ -1,0 +1,51 @@
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Go build outputs & caches
+/protector
+/goprotect
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.cov
+*.coverprofile
+*.prof
+.gocache/
+
+# Project artifacts
+build/
+tmp/
+dist/
+protector.tmp
+reports/
+report_text.txt
+
+# Android packages & keys
+*.apk
+*.aab
+*.apks
+*.idsig
+*.keystore
+*.jks
+*.mapping.txt
+
+# Misc
+.env
+*.log
+
+# Config samples
+config.json
+*.local.json
+*.secret.json
+*.secrets.json
+*.env.json
+!*.json.example
+/sign/

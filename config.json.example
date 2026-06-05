@@ -1,0 +1,56 @@
+{
+  "input_apk": "app-release.apk",
+  "final_output": "dist/app-protected-signed.apk",
+  "work_dir": "build/temp",
+  "keep_work_dir": false,
+  "protections": {
+    "enabled": true,
+    "random_package": true,
+    "package_prefix": "com.secure.guard",
+    "multi_dex_encrypt": true,
+    "dex_encrypt": false,
+    "compress_before_encrypt": true,
+    "pseudo_encrypt": true,
+    "encryption_secret": "${APK_PROTECT_SECRET}"
+  },
+  "reinforce": {
+    "enabled": false,
+    "command": "",
+    "args": [],
+    "env": {},
+    "timeout": "5m",
+    "output_apk": "",
+    "skip_if_output_exists": false
+  },
+  "zipalign": {
+    "enabled": true,
+    "path": "~/Library/Android/sdk/build-tools/36.1.0/zipalign",
+    "alignment": 4,
+    "output_apk": ""
+  },
+  "signing": {
+    "enabled": true,
+    "apksigner_path": "~/Library/Android/sdk/build-tools/36.1.0/apksigner",
+    "keystore": "",
+    "key_alias": "",
+    "store_pass": "",
+    "key_pass": "",
+    "output_apk": "",
+    "create_keystore": false,
+    "keytool_path": "keytool",
+    "key_algorithm": "RSA",
+    "key_size": 2048,
+    "validity_days": 3650,
+    "distinguished_name": "CN=Android Hardening,O=Automation,OU=Security,L=Unknown,ST=Unknown,C=CN",
+    "additional_args": []
+  },
+  "verification": { "enabled": true },
+  "scanning": {
+    "enabled": true,
+    "apksigner_path": "~/Library/Android/sdk/build-tools/36.1.0/apksigner",
+    "keywords": ["root", "frida", "xposed", "magisk", "genymotion", "proxy", "vpn", "emulator"],
+    "key_leak_hints": ["BEGIN PRIVATE KEY", "AKIA", "SECRET", "password=", "access_key", "token"],
+    "max_scan_size_mb": 4
+  },
+  "reporting": { "json": "dist/report.json" }
+}

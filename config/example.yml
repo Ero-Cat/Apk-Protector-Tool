@@ -1,0 +1,43 @@
+# Example configuration for goprotect
+input: input.bc
+output: output.bc
+
+functions:
+  allow: []   # empty means all
+  deny: []
+
+passes:
+  entry_exit: true
+  const_split: true
+  cf_flatten: true
+  instr_substitute: true
+  const_obfuscation: true
+  virtualization: false
+  security_hooks: true
+
+obfuscation:
+  level: medium
+  substitute_intensity: 2
+  flatten_ratio: 50
+  virtualize_ratio: 10
+
+vmp:
+  enable_multi_vm: true
+  vms:
+    - {name: vm_a, isa: A}
+    - {name: vm_b, isa: B}
+  levels:
+    normal: vm_a
+    sensitive: vm_b
+    critical: vm_b
+    function_vm: {}
+    sensitive_list: []
+    critical_list: []
+  static_key: ${GOPROTECT_STATIC_KEY}
+  runtime_key_hint: ${GOPROTECT_RUNTIME_KEY_HINT}
+
+report:
+  path: dist/goprotect-report.json
+
+debug:
+  dump_cfg: false
