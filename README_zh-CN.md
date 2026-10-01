@@ -110,7 +110,17 @@ protector \
 
 流水线做的每一件事 —— 扫描发现、保护步骤、产物与 SHA-256 —— 都会写入 `dist/report.json` 供审计。
 
-> 是的，参数确实不少。`protector ui` 终端向导与 `-profile` 预设正是[路线图](#-开发路线图)的首要事项，目标是把上面的流程变成三步操作。
+参数太多？完全可以不碰：
+
+```bash
+# 交互向导：选 APK → 选预设 → 填路径（自动探测）→ 执行
+export APK_STORE_PASS=...            # 密钥从环境变量读取，绝不手输
+protector ui
+
+# 或用预设走 headless
+protector -profile full -input app-release.apk \
+  -keystore sign/release.keystore -store-pass-env APK_STORE_PASS -key-alias release
+```
 
 ---
 
@@ -133,6 +143,11 @@ protector \
 }
 ```
 
+交互向导（`protector ui`）把同一条流水线变成五步表单 —— build-tools 路径自动探测、密钥按环境变量名引用、生成的配置保留 `${VAR}` 引用而非明文密码：
+
+![protector ui 向导](docs/assets/demo-tui.svg)
+<small>S3 配置界面示意图。</small>
+
 ---
 
 ## ✨ 功能特性
@@ -143,6 +158,8 @@ protector \
 
 | 功能 | 说明 |
 |------|------|
+| 交互向导 | `protector ui`：五步 Bubbletea TUI —— build-tools 自动探测、预设选择、密钥走 env 引用、配置预览 |
+| Headless 预设 | `-profile quick\|full\|sign-only` 把参数面压缩到输入 + 签名材料 |
 | 静态安全扫描 | 检出加固器指纹、内嵌 APK/证书、私钥泄露、反环境关键词（frida、xposed、magisk…）、Janus 签名风险 |
 | DEX 加密 | 全部 `classes*.dex` 使用 AES-256-GCM 加密；可选 Deflate 预压缩 |
 | 包名随机化 | 等长改写清单包名，干扰静态分析 |
@@ -183,6 +200,30 @@ protector \
 
 ```
 protector -input <app.apk> [options]
+protector ui                                  # 交互向导
+protector -profile full -input <app.apk> ...  # headless 预设
+```
+
+#### 交互向导 — `protector ui`
+
+五步终端向导（Bubbletea）：选择 APK → 选择预设 → 填写路径（build-tools 从 `ANDROID_HOME`/SDK 位置自动探测，取值跨运行记忆）→ 预览生成的配置 → 带阶段进度地执行。
+
+密钥字段只接受**环境变量名**（如 `APK_STORE_PASS`），绝不接受明文 —— 向导会校验变量已 export，写出的配置保留 `${APK_STORE_PASS}` 引用。在无 TTY 的环境（CI、管道）中以退出码 2 退出并提示改用 `-profile`。
+
+#### 预设 — `-profile quick|full|sign-only`
+
+| 预设 | 步骤 | 适用 |
+|------|------|------|
+| `quick` | 扫描 → 对齐 → 签名 | 发布卫生检查 |
+| `full` | 扫描 → 全保护（多 DEX、压缩、包名随机化、伪加固）→ 对齐 → 签名 → 验签 | 最大强度加固 |
+| `sign-only` | 对齐 → 签名 → 验签 | 改包后重签 |
+
+预设应用在配置文件之上；显式 flag 仍然优先。配合 env 密钥参数，敏感信息不进 shell history：
+
+```bash
+protector -profile full -input app.apk \
+  -keystore sign/release.keystore -key-alias release \
+  -store-pass-env APK_STORE_PASS -protect-secret-env APK_PROTECT_SECRET
 ```
 
 #### 核心参数
@@ -191,6 +232,7 @@ protector -input <app.apk> [options]
 |------|--------|------|
 | `-input` | — | 源 APK（必填，或在配置中设置 `input_apk`） |
 | `-config` | — | JSON/YAML 配置文件路径 |
+| `-profile` | — | 预设基线：`quick`、`full` 或 `sign-only` |
 | `-output` | `dist/<名称>-protected.apk` | 最终产物路径 |
 | `-report` | — | JSON 运行报告输出路径 |
 | `-workdir` | 系统临时目录 | 每次运行临时目录的根 |
@@ -207,6 +249,7 @@ protector -input <app.apk> [options]
 | `-protect-random-package` | 关 | 随机化清单包名 |
 | `-protect-package-prefix` | `com.protector` | 随机包名前缀 |
 | `-protect-secret` | 随机生成 | AES 密钥派生所用密钥 |
+| `-protect-secret-env` | — | 持有加密密钥的环境变量名（推荐） |
 | `-protect-pseudo` | 关 | 内嵌伪加固产物 |
 
 #### 签名与对齐参数
@@ -217,7 +260,9 @@ protector -input <app.apk> [options]
 | `-apksigner` | PATH 上的 `apksigner` | apksigner 路径；设置即启用签名 |
 | `-keystore` | — | V1+V2 签名用 keystore |
 | `-store-pass` | — | keystore 密码 |
+| `-store-pass-env` | — | 持有 keystore 密码的环境变量名（推荐） |
 | `-key-pass` | 同 store-pass | 密钥密码 |
+| `-key-pass-env` | — | 持有密钥密码的环境变量名 |
 | `-key-alias` | — | 签名密钥别名 |
 | `-verify` | 关 | 签名后执行 `apksigner verify --print-certs` |
 | `-create-keystore` | 关 | 经 `keytool` 自动生成 keystore |
@@ -256,7 +301,7 @@ goprotect -input module.bc -config config/example.yml -o module_protected.bc
 - [`config.json.example`](config.json.example) —— `protector` 完整配置（保护、扫描、第三方加固、对齐、签名含 keystore 自动创建）
 - [`config/example.yml`](config/example.yml) —— `goprotect` 完整配置（Pass、等级、多 VM 设置）
 
-优先级：CLI 参数在配置值之上做**启用**覆盖，配置文件是基线。注意：配置中的 `${VAR}` 目前**不会**展开 —— 在[路线图 P0.3](docs/ROADMAP.md) 落地前，请通过参数/环境变量接入真实密钥。
+优先级：CLI 参数在配置值之上做**启用**覆盖，配置文件是基线（`-profile` 预设位于两者之间）。字符串值支持 `${VAR}` 与 `${VAR:-default}` 环境变量引用 —— 未设置且无默认值的变量会在加载时报错，缺失的密钥快速失败而不是被按字面使用。
 
 ### 运行时集成
 
@@ -298,7 +343,7 @@ make
 
 | 阶段 | 主题 | 代表事项 |
 |------|------|----------|
-| **P0** | 加固 UX 与配置安全 | `protector ui` TUI 向导、`-profile` 预设、`${VAR}` 环境变量展开、env 密钥参数 |
+| **P0** | 加固 UX 与配置安全 | ✅ `protector ui` TUI 向导、`-profile` 预设、`${VAR}` 环境变量展开与 env 密钥参数**已完成**；CLI 子命令化与覆盖语义修复仍在进行 |
 | **P1** | VMP 端到端 | 导出 opcode 映射到元数据、实现字节码解密、修复分支/调用编译 |
 | **P2** | Pass 正确性 | cf-flatten 真实终结器重写、const-obf 字面量加密、`.ll` 输入、DOT 导出 |
 | **P3** | Android 运行时 | 真实完整性哈希、Frida 端口检测、DEX 加载/解密器 |
@@ -310,6 +355,9 @@ make
 
 **必须安装 LLVM 吗？**
 不需要。LLVM 只在构建/运行 `goprotect` 时需要（`go build -tags llvm`）。`protector` 的 APK 流水线是纯 Go 加 Android build-tools 二进制。
+
+**怎么避免敲一长串参数？**
+运行 `protector ui` 走交互向导，或用 `-profile quick|full|sign-only` 走 headless。密钥经 `-store-pass-env` 类参数或配置里的 `${VAR}` 引用接入，命令行干净且不落 history。
 
 **加密后的 DEX 怎么运行？**
 目前开箱即用还跑不起来。流水线把 DEX 加密进 `assets/protector/` 并写入元数据，但 Android 侧加载/解密器属于实验性运行时工作（路线图 P3）。当前请把 DEX 加密视为积木组件，发布卫生依赖扫描 + 包名随机化 + 签名。

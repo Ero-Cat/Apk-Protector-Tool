@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Ero-Cat/Apk-Protector-Tool/internal/envref"
 )
 
 // Config controls the reinforcement and signing workflow.
@@ -119,9 +121,50 @@ func LoadConfig(path string) (*Config, error) {
 	if err := unmarshalConfig(data, absPath, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if err := cfg.expandEnvRefs(); err != nil {
+		return nil, fmt.Errorf("config %s: %w", absPath, err)
+	}
 
 	cfg.baseDir = filepath.Dir(absPath)
 	return cfg, nil
+}
+
+// expandEnvRefs resolves ${VAR} and ${VAR:-default} references in path and
+// secret fields. Unset variables without a default are errors so that a
+// missing secret fails at load time instead of being used literally.
+func (c *Config) expandEnvRefs() error {
+	fields := []*string{
+		&c.InputAPK,
+		&c.FinalOutput,
+		&c.WorkDir,
+		&c.Protections.PackagePrefix,
+		&c.Protections.EncryptionSecret,
+		&c.Reinforce.Command,
+		&c.Reinforce.OutputAPK,
+		&c.Zipalign.Path,
+		&c.Zipalign.OutputAPK,
+		&c.Signing.ApksignerPath,
+		&c.Signing.Keystore,
+		&c.Signing.KeyAlias,
+		&c.Signing.StorePass,
+		&c.Signing.KeyPass,
+		&c.Signing.OutputAPK,
+		&c.Signing.KeytoolPath,
+		&c.Signing.DistinguishedName,
+		&c.Reporting.JSON,
+		&c.Scanning.ApksignerPath,
+	}
+	for _, f := range fields {
+		if !strings.Contains(*f, "${") {
+			continue
+		}
+		expanded, err := envref.Expand(*f)
+		if err != nil {
+			return err
+		}
+		*f = expanded
+	}
+	return nil
 }
 
 func unmarshalConfig(data []byte, path string, cfg *Config) error {

@@ -110,7 +110,17 @@ protector \
 
 Everything the pipeline did — scan findings, protection steps, artifacts and SHA-256 — lands in `dist/report.json` for auditing.
 
-> Yes, that is a lot of flags. A `protector ui` terminal wizard and `-profile` presets are the top item on the [roadmap](#-roadmap) precisely to make this a 3-step flow.
+Too many flags? Skip them entirely:
+
+```bash
+# interactive wizard: pick APK → pick profile → fill paths (auto-detected) → run
+export APK_STORE_PASS=...            # secrets are read from env vars, never typed
+protector ui
+
+# or headless with a preset
+protector -profile full -input app-release.apk \
+  -keystore sign/release.keystore -store-pass-env APK_STORE_PASS -key-alias release
+```
 
 ---
 
@@ -133,6 +143,11 @@ The same run produces a machine-readable report:
 }
 ```
 
+The interactive wizard (`protector ui`) turns the same pipeline into a five-step form — build-tools paths are auto-detected, secrets are referenced by environment variable name, and the generated config keeps `${VAR}` references instead of literal passwords:
+
+![protector ui wizard](docs/assets/demo-tui.svg)
+<small>Illustration of the S3 configuration screen.</small>
+
 ---
 
 ## ✨ Features
@@ -143,6 +158,8 @@ The same run produces a machine-readable report:
 
 | Feature | What it does |
 |---------|--------------|
+| Interactive wizard | `protector ui`: 5-step Bubbletea TUI — auto-detected build-tools, profile presets, env-referenced secrets, config preview |
+| Headless presets | `-profile quick\|full\|sign-only` collapses the flag surface to input + signing material |
 | Static security scan | Detects hardener fingerprints, embedded APKs/certificates, private-key leaks, anti-environment keywords (frida, xposed, magisk, …), Janus signature risk |
 | DEX encryption | All `classes*.dex` encrypted with AES-256-GCM; optional Deflate pre-compression |
 | Package randomization | Rewrites the manifest package name (same-length) to blur static analysis |
@@ -183,6 +200,30 @@ The same run produces a machine-readable report:
 
 ```
 protector -input <app.apk> [options]
+protector ui                                  # interactive wizard
+protector -profile full -input <app.apk> ...  # headless preset
+```
+
+#### Interactive wizard — `protector ui`
+
+A five-step terminal wizard (Bubbletea): pick the APK → pick a profile → fill in paths (build-tools auto-detected from `ANDROID_HOME`/SDK locations, values remembered between runs) → review the generated config → run with live stage progress.
+
+Secret fields accept **environment variable names** (`APK_STORE_PASS`), never values — the wizard validates that the variable is exported, and the written config keeps `${APK_STORE_PASS}` references. Without a TTY (CI, pipes) it exits with code 2 and points you at `-profile`.
+
+#### Presets — `-profile quick|full|sign-only`
+
+| Profile | Steps | Use for |
+|---------|-------|---------|
+| `quick` | scan → zipalign → sign | Release hygiene pass |
+| `full` | scan → protect (multi-dex, compress, random package, pseudo) → zipalign → sign → verify | Maximum hardening |
+| `sign-only` | zipalign → sign → verify | Re-signing after edits |
+
+The profile is applied on top of the config file; explicit flags still win. Combine with env-based secret flags so nothing sensitive lands in shell history:
+
+```bash
+protector -profile full -input app.apk \
+  -keystore sign/release.keystore -key-alias release \
+  -store-pass-env APK_STORE_PASS -protect-secret-env APK_PROTECT_SECRET
 ```
 
 #### Core options
@@ -191,6 +232,7 @@ protector -input <app.apk> [options]
 |------|---------|-------------|
 | `-input` | — | Source APK (required, or set `input_apk` in config) |
 | `-config` | — | Path to JSON/YAML config file |
+| `-profile` | — | Preset baseline: `quick`, `full` or `sign-only` |
 | `-output` | `dist/<name>-protected.apk` | Final artifact path |
 | `-report` | — | Where to write the JSON run report |
 | `-workdir` | OS temp | Root for per-run temp directories |
@@ -207,6 +249,7 @@ protector -input <app.apk> [options]
 | `-protect-random-package` | off | Randomize the manifest package name |
 | `-protect-package-prefix` | `com.protector` | Prefix for the randomized package |
 | `-protect-secret` | random | Secret for AES key derivation |
+| `-protect-secret-env` | — | Name of env var holding the encryption secret (preferred) |
 | `-protect-pseudo` | off | Embed pseudo-hardening artifacts |
 
 #### Signing & alignment options
@@ -217,7 +260,9 @@ protector -input <app.apk> [options]
 | `-apksigner` | `apksigner` on PATH | apksigner binary; setting it enables signing |
 | `-keystore` | — | Keystore for V1+V2 signing |
 | `-store-pass` | — | Keystore password |
+| `-store-pass-env` | — | Name of env var holding the keystore password (preferred) |
 | `-key-pass` | = store-pass | Key password |
+| `-key-pass-env` | — | Name of env var holding the key password |
 | `-key-alias` | — | Signing key alias |
 | `-verify` | off | Run `apksigner verify --print-certs` after signing |
 | `-create-keystore` | off | Auto-generate a keystore via `keytool` |
@@ -256,7 +301,7 @@ Both CLIs accept JSON **or** YAML configs. Relative paths inside a config resolv
 - [`config.json.example`](config.json.example) — full `protector` configuration (protections, scan, reinforce, zipalign, signing incl. keystore auto-creation)
 - [`config/example.yml`](config/example.yml) — full `goprotect` configuration (passes, levels, multi-VM setup)
 
-Precedence: CLI flags switch options **on** over config values; the config file is the baseline. Note that `${VAR}` strings in configs are currently **not** expanded — wire real secrets via flags/env until [roadmap item P0.3](docs/ROADMAP.md) lands.
+Precedence: CLI flags switch options **on** over config values; the config file is the baseline (a `-profile` preset sits between the two). String values support `${VAR}` and `${VAR:-default}` environment references — an unset variable without a default is a load-time error, so missing secrets fail fast instead of being used literally.
 
 ### Runtime integration
 
@@ -298,7 +343,7 @@ The full plan — with per-item status, code evidence and acceptance criteria �
 
 | Phase | Theme | Highlight items |
 |-------|-------|-----------------|
-| **P0** | Hardening UX & config safety | `protector ui` TUI wizard, `-profile` presets, `${VAR}` env expansion, env-based secret flags |
+| **P0** | Hardening UX & config safety | ✅ `protector ui` TUI wizard, `-profile` presets, `${VAR}` env expansion and env-based secret flags are **done**; CLI sub-command restructure and override-semantics fixes remain |
 | **P1** | VMP end-to-end | Export opcode map to metadata, implement bytecode decryption, fix branch/call compilation |
 | **P2** | Pass correctness | Real terminator rewriting in cf-flatten, literal encryption in const-obf, `.ll` input, DOT dumps |
 | **P3** | Android runtime | Real integrity hashing, Frida port detection, DEX loader/decryptor |
@@ -310,6 +355,9 @@ The full plan — with per-item status, code evidence and acceptance criteria �
 
 **Do I need LLVM installed?**
 No. LLVM is only required to build/run `goprotect` (`go build -tags llvm`). The `protector` APK pipeline is pure Go plus the Android build-tools binaries.
+
+**How do I avoid typing a wall of flags?**
+Run `protector ui` for the interactive wizard, or use `-profile quick|full|sign-only` headlessly. Secrets go through `-store-pass-env`-style flags or `${VAR}` config references, so command lines stay clean and history-free.
 
 **How do encrypted DEX files actually run?**
 They don't — not yet, out of the box. The pipeline encrypts DEX into `assets/protector/` and writes metadata, but the Android-side loader/decryptor is part of the experimental runtime work (roadmap P3). Today, treat DEX encryption as a building block, and rely on scan + package randomization + signing for release hygiene.

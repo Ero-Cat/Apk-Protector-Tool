@@ -8,7 +8,7 @@
 
 | 阶段 | 主题 | 条目数 | 预估工作量 | 状态 |
 |------|------|--------|-----------|------|
-| [P0](#p0-加固-ux-与配置安全) | 加固 UX 与配置安全（protector） | 5 | M | 🔜 建议最先 |
+| [P0](#p0-加固-ux-与配置安全) | 加固 UX 与配置安全（protector） | 5 | M | 🟢 P0.1/P0.3/P0.4 已完成，P0.2 部分完成 |
 | [P1](#p1-vmp-端到端打通) | VMP 端到端 | 7 | L | ⏳ 设计完成 |
 | [P2](#p2-pass-正确性) | Pass 正确性 | 6 | M–L | ⏳ 部分实现 |
 | [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 | M | ⏳ 骨架就绪 |
@@ -20,9 +20,11 @@
 
 ## P0 加固 UX 与配置安全
 
-### P0.1 Bubbletea TUI 向导（`protector ui`）
+### P0.1 Bubbletea TUI 向导（`protector ui`）✅ 已实现
 
 > 详细交互设计与选型评估见 [docs/design/tui-evaluation.md](design/tui-evaluation.md)。
+>
+> **落地情况**：五步向导（选 APK → 选预设 → 表单 → 预览 → 执行）已随 `internal/ui` 包交付；build-tools 自动探测、跨运行状态记忆（`os.UserConfigDir()/protector/state.json`）、密钥 env 名输入与校验、`${VAR}` 引用写盘、非 TTY 环境退出码 2 降级均已实现。表单纯逻辑位于 `internal/ui/form.go`（表驱动测试覆盖）。
 
 - **现状**：`protector` 共 28 个扁平 flag（`cmd/protector/main.go:30-63`），README 快速开始示例需要 14 个参数；无预设、无交互模式，运维心智负担重。
 - **目标**：`protector ui` 子命令提供表单式向导：选 APK → 选预设 → 路径/密钥 → 预览生成 config → 写盘或直接执行。
@@ -33,7 +35,9 @@
   4. 生成 config 前展示 diff 预览，确认后写入 `config.json` 或直接调用 `app.Tool.Run`。
 - **验收标准**：`protector ui` 在不读文档的情况下 3 步内完成一次完整加固；`TERM=dumb` 或 CI 环境自动降级为报错提示改用 `-profile`。
 
-### P0.2 CLI 重构：子命令 + 预设（`-profile`）
+### P0.2 CLI 重构：子命令 + 预设（`-profile`）🟡 部分完成
+
+> **落地情况**：`-profile quick|full|sign-only` 预设与 `protector ui` 子命令分发已实现（`cmd/protector/main.go` + `internal/presets`）。剩余：`run|scan|sign|config init` 完整子命令化、flag 与配置文件的"独占项"对齐、扁平 flag 兼容期的弃用警告。
 
 - **现状**：单命令扁平 28 flag；配置文件选项与 flag 分裂（`keep_work_dir`、`reinforce.timeout`、`zipalign.alignment`、keystore 生成参数等只能走配置文件）；`-protect-dex` 与 `-protect-multi-dex` 语义重叠。
 - **目标**：分组子命令 `protector run|scan|sign|config init` + 内置预设 `-profile quick|full|sign-only`，常见路径压缩到 1–3 个参数。
@@ -44,7 +48,9 @@
   4. 补齐"配置文件独占项"的 flag 等价物，消除分裂。
 - **验收标准**：`protector run -profile full -input app.apk` 等价于现有 14-flag 示例；`protector config init` 生成带注释的 config 模板。
 
-### P0.3 配置 `${VAR}` 环境变量展开 🔴 安全
+### P0.3 配置 `${VAR}` 环境变量展开 🔴 安全 ✅ 已实现
+
+> **落地情况**：`internal/envref` 包实现 `${VAR}`/`${VAR:-default}`（缺变量报错点名），`internal/app` 与 `config`（goprotect）两侧加载路径均已接入，两侧各有表驱动测试。
 
 - **现状**：`config.json.example:14` 写了 `"encryption_secret": "${APK_PROTECT_SECRET}"`、`config/example.yml:36-37` 写了 `${GOPROTECT_STATIC_KEY}`，但 `internal/app/config.go` 与 `config/config.go` 的加载路径**从不调用** `os.ExpandEnv`——这些字符串会被当作字面密钥使用。示例引导用户踩坑。
 - **目标**：配置加载时对字符串字段做 `${VAR}` 展开；变量不存在时报错（除非 `${VAR:-default}`）。
@@ -54,7 +60,9 @@
   3. 加表驱动测试：展开、缺变量报错、默认值语法、字面 `$` 转义。
 - **验收标准**：示例配置 + 环境变量可直接工作；CI 中 `APK_PROTECT_SECRET` 注入后报告里不再出现字面 `${…}`。
 
-### P0.4 env 密钥参数（`-store-pass-env` 等）🔴 安全
+### P0.4 env 密钥参数（`-store-pass-env` 等）🔴 安全 ✅ 已实现
+
+> **落地情况**：`-protect-secret-env`/`-store-pass-env`/`-key-pass-env` 三个 flag 已实现，启动时解析并校验变量已设置（未设置给出点名用途的可行动报错）。
 
 - **现状**：`-store-pass`/`-key-pass`/`-protect-secret` 直接传值，会落入 shell history 与 `ps` 进程列表。
 - **目标**：新增 `-store-pass-env`/`-key-pass-env`/`-protect-secret-env`，取环境变量名而非值。

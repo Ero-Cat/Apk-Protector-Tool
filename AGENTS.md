@@ -5,7 +5,7 @@
 | Dimension | Details |
 |-----------|---------|
 | **Language** | Go 1.25 |
-| **Dependencies** | `gopkg.in/yaml.v3` |
+| **Dependencies** | `gopkg.in/yaml.v3`、Charm 栈（`bubbletea`/`bubbles`/`lipgloss`，用于 `protector ui` TUI） |
 | **Architecture** | Layered (CLI → Internal → Config/Passes) |
 | **Entry Points** | `cmd/protector` (APK), `cmd/goprotect` (LLVM) |
 | **Config Format** | JSON + YAML dual-mode |

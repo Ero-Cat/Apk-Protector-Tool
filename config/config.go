@@ -2,11 +2,14 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Ero-Cat/Apk-Protector-Tool/internal/envref"
 )
 
 // Config 描述工具的输入输出、启用的 Pass 以及混淆强度。
@@ -174,6 +177,30 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := expandEnvRefs(cfg); err != nil {
+		return nil, fmt.Errorf("expand config %s: %w", path, err)
+	}
 	defaults(cfg)
 	return cfg, nil
+}
+
+// expandEnvRefs 解析配置中的 ${VAR} 与 ${VAR:-default} 引用；未设置且无默认值时直接报错。
+func expandEnvRefs(cfg *Config) error {
+	fields := []*string{
+		&cfg.Input,
+		&cfg.Output,
+		&cfg.Report.Path,
+		&cfg.VMP.StaticKey,
+	}
+	for _, f := range fields {
+		if !strings.Contains(*f, "${") {
+			continue
+		}
+		expanded, err := envref.Expand(*f)
+		if err != nil {
+			return err
+		}
+		*f = expanded
+	}
+	return nil
 }

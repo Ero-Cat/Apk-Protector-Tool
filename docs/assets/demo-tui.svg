@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="640" viewBox="0 0 800 640" role="img" aria-label="protector ui TUI wizard: configuration form (illustration)">
+  <!-- window -->
+  <rect x="0" y="0" width="800" height="640" rx="12" fill="#0D1117"/>
+  <rect x="0" y="0" width="800" height="44" rx="12" fill="#161B22"/>
+  <rect x="0" y="32" width="800" height="12" fill="#161B22"/>
+  <circle cx="24" cy="22" r="6" fill="#FF5F57"/>
+  <circle cx="44" cy="22" r="6" fill="#FEBC2E"/>
+  <circle cx="64" cy="22" r="6" fill="#28C840"/>
+  <text x="400" y="27" text-anchor="middle" fill="#8B949E" font-family="Menlo, Monaco, 'Courier New', monospace" font-size="13">protector ui — configure (profile: full)</text>
+
+  <g font-family="Menlo, Monaco, 'Courier New', monospace" font-size="15" fill="#E6EDF3">
+    <text x="28" y="80"><tspan fill="#00ADD8" font-weight="bold">protector ui</tspan><tspan fill="#8B949E"> — APK hardening wizard</tspan></text>
+    <text x="28" y="116" fill="#3DDC84">Step 3/5 · Configure  <tspan fill="#8B949E">(profile: full)</tspan></text>
+
+    <text x="28" y="156"><tspan fill="#3DDC84" font-weight="bold">▸ </tspan><tspan fill="#79C0FF">Output APK:</tspan></text>
+    <text x="52" y="180">dist/app-protected.apk<tspan fill="#E6EDF3">_</tspan></text>
+    <text x="28" y="212"><tspan fill="#6E7681">  </tspan><tspan fill="#79C0FF">zipalign:</tspan></text>
+    <text x="52" y="236">/Users/dev/Library/Android/sdk/build-tools/36.1.0/zipalign</text>
+    <text x="28" y="268"><tspan fill="#6E7681">  </tspan><tspan fill="#79C0FF">apksigner:</tspan></text>
+    <text x="52" y="292">/Users/dev/Library/Android/sdk/build-tools/36.1.0/apksigner</text>
+    <text x="28" y="324"><tspan fill="#6E7681">  </tspan><tspan fill="#79C0FF">Keystore:</tspan></text>
+    <text x="52" y="348">sign/release.keystore</text>
+    <text x="28" y="380"><tspan fill="#6E7681">  </tspan><tspan fill="#3DDC84">[x]</tspan> Auto-generate keystore</text>
+    <text x="28" y="412"><tspan fill="#6E7681">  </tspan><tspan fill="#79C0FF">Key alias:</tspan></text>
+    <text x="52" y="436">release</text>
+    <text x="28" y="468"><tspan fill="#6E7681">  </tspan><tspan fill="#79C0FF">Store password (env name):</tspan></text>
+    <text x="52" y="492">APK_STORE_PASS</text>
+    <text x="52" y="514" fill="#6E7681">name of the env var holding the keystore password</text>
+    <text x="28" y="546"><tspan fill="#6E7681">  </tspan><tspan fill="#3DDC84">[x]</tspan> Encrypt all DEX files   <tspan fill="#3DDC84">[x]</tspan> Compress before encrypt</text>
+    <text x="28" y="574"><tspan fill="#6E7681">  </tspan><tspan fill="#3DDC84">[x]</tspan> Randomize package name <tspan fill="#3DDC84">[x]</tspan> Pseudo hardening markers</text>
+
+    <text x="28" y="616" fill="#6E7681">tab/↑↓ next field · space toggle · enter submit · esc back</text>
+  </g>
+</svg>

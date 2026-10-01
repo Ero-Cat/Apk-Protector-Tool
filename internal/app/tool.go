@@ -19,11 +19,43 @@ import (
 // Tool orchestrates the APK reinforcement and signing workflow.
 type Tool struct {
 	cfg *Config
+
+	// Progress is invoked at the start of each pipeline stage (scan, protect,
+	// reinforce, align, sign, verify, finalize). It is optional and mainly
+	// consumed by the interactive UI.
+	Progress func(stage string)
+
+	// Stdout and Stderr receive output produced by external commands such as
+	// zipalign and apksigner. They default to the process streams when nil;
+	// the interactive UI injects buffers so that child output does not tear
+	// the rendered screen apart.
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // NewTool creates a Tool instance.
 func NewTool(cfg *Config) *Tool {
 	return &Tool{cfg: cfg}
+}
+
+func (t *Tool) progress(stage string) {
+	if t.Progress != nil {
+		t.Progress(stage)
+	}
+}
+
+func (t *Tool) stdout() io.Writer {
+	if t.Stdout != nil {
+		return t.Stdout
+	}
+	return os.Stdout
+}
+
+func (t *Tool) stderr() io.Writer {
+	if t.Stderr != nil {
+		return t.Stderr
+	}
+	return os.Stderr
 }
 
 // ReportStep captures the status of each pipeline stage.
@@ -126,6 +158,7 @@ func (t *Tool) Run(ctx context.Context) (*Report, error) {
 		"ts":       report.StartedAt.Format("20060102T150405"),
 	}
 
+	t.progress("protect")
 	protectedApk, err := t.runProtections(currentApk, baseName, runDir, report)
 	if err != nil {
 		return report, err
@@ -164,6 +197,7 @@ func (t *Tool) Run(ctx context.Context) (*Report, error) {
 		}
 	}
 
+	t.progress("finalize")
 	finalOutput := t.cfg.FinalOutput
 	if finalOutput == "" {
 		finalOutput = filepath.Join(cwd, "dist", baseName+"-protected.apk")
@@ -189,6 +223,7 @@ func (t *Tool) runScanning(apkPath string, report *Report) error {
 	if !t.cfg.Scanning.Enabled {
 		return nil
 	}
+	t.progress("scan")
 	step := ReportStep{Name: "scan"}
 	defer func() {
 		report.Steps = append(report.Steps, step)
@@ -214,6 +249,11 @@ func (t *Tool) runReinforce(ctx context.Context, currentApk, baseName, runDir st
 		report.Steps = append(report.Steps, step)
 	}()
 
+	if !cfg.Enabled || cfg.Command == "" {
+		return "", nil
+	}
+	t.progress("reinforce")
+
 	output := cfg.OutputAPK
 	if output == "" {
 		output = filepath.Join(runDir, baseName+"-reinforced.apk")
@@ -237,7 +277,7 @@ func (t *Tool) runReinforce(ctx context.Context, currentApk, baseName, runDir st
 	if err != nil {
 		return "", err
 	}
-	if err := runCommand(ctx, command, args, env, timeout); err != nil {
+	if err := t.runCommand(ctx, command, args, env, timeout); err != nil {
 		step.Status = "failed"
 		step.Details = err.Error()
 		return "", fmt.Errorf("reinforce command: %w", err)
@@ -267,6 +307,7 @@ func (t *Tool) runZipalign(ctx context.Context, currentApk, baseName, runDir str
 		}
 		autoEnabled = true
 	}
+	t.progress("align")
 	step := ReportStep{Name: "zipalign"}
 	if autoEnabled {
 		step.Name = "zipalign_auto"
@@ -289,7 +330,7 @@ func (t *Tool) runZipalign(ctx context.Context, currentApk, baseName, runDir str
 		alignment = 4
 	}
 	args := []string{"-p", "-f", strconv.Itoa(alignment), currentApk, output}
-	if err := runCommand(ctx, path, args, nil, 0); err != nil {
+	if err := t.runCommand(ctx, path, args, nil, 0); err != nil {
 		step.Status = "failed"
 		step.Details = err.Error()
 		if autoEnabled {
@@ -328,6 +369,7 @@ func (t *Tool) runSigning(ctx context.Context, currentApk, baseName, runDir stri
 	if !cfg.Enabled {
 		return "", nil
 	}
+	t.progress("sign")
 	step := ReportStep{Name: "sign"}
 	defer func() {
 		report.Steps = append(report.Steps, step)
@@ -338,7 +380,7 @@ func (t *Tool) runSigning(ctx context.Context, currentApk, baseName, runDir stri
 		output = filepath.Join(runDir, baseName+"-signed.apk")
 	}
 
-	if err := ensureKeystore(ctx, cfg); err != nil {
+	if err := t.ensureKeystore(ctx, cfg); err != nil {
 		step.Status = "failed"
 		step.Details = err.Error()
 		return "", err
@@ -357,7 +399,7 @@ func (t *Tool) runSigning(ctx context.Context, currentApk, baseName, runDir stri
 	args = append(args, cfg.AdditionalArgs...)
 	args = append(args, currentApk)
 
-	if err := runCommand(ctx, cfg.ApksignerPath, args, nil, 0); err != nil {
+	if err := t.runCommand(ctx, cfg.ApksignerPath, args, nil, 0); err != nil {
 		step.Status = "failed"
 		step.Details = err.Error()
 		return "", fmt.Errorf("apksigner: %w", err)
@@ -375,6 +417,7 @@ func (t *Tool) runSigning(ctx context.Context, currentApk, baseName, runDir stri
 }
 
 func (t *Tool) runVerification(ctx context.Context, apk string, report *Report) error {
+	t.progress("verify")
 	step := ReportStep{Name: "verify"}
 	defer func() {
 		report.Steps = append(report.Steps, step)
@@ -385,7 +428,7 @@ func (t *Tool) runVerification(ctx context.Context, apk string, report *Report) 
 		"--print-certs",
 		apk,
 	}
-	if err := runCommand(ctx, t.cfg.Signing.ApksignerPath, args, nil, 0); err != nil {
+	if err := t.runCommand(ctx, t.cfg.Signing.ApksignerPath, args, nil, 0); err != nil {
 		step.Status = "failed"
 		step.Details = err.Error()
 		return fmt.Errorf("apksigner verify: %w", err)
@@ -395,7 +438,7 @@ func (t *Tool) runVerification(ctx context.Context, apk string, report *Report) 
 	return nil
 }
 
-func ensureKeystore(ctx context.Context, cfg SigningConfig) error {
+func (t *Tool) ensureKeystore(ctx context.Context, cfg SigningConfig) error {
 	if fileExists(cfg.Keystore) {
 		return nil
 	}
@@ -418,7 +461,7 @@ func ensureKeystore(ctx context.Context, cfg SigningConfig) error {
 		"-validity", strconv.Itoa(cfg.ValidityDays),
 		"-dname", cfg.DistinguishedName,
 	}
-	return runCommand(ctx, cfg.KeytoolPath, args, nil, 0)
+	return t.runCommand(ctx, cfg.KeytoolPath, args, nil, 0)
 }
 
 func parseTimeout(value string) (time.Duration, error) {
@@ -432,7 +475,7 @@ func parseTimeout(value string) (time.Duration, error) {
 	return d, nil
 }
 
-func runCommand(ctx context.Context, bin string, args []string, env map[string]string, timeout time.Duration) error {
+func (t *Tool) runCommand(ctx context.Context, bin string, args []string, env map[string]string, timeout time.Duration) error {
 	if bin == "" {
 		return fmt.Errorf("command path is empty")
 	}
@@ -446,8 +489,8 @@ func runCommand(ctx context.Context, bin string, args []string, env map[string]s
 	defer cancel()
 
 	cmd := exec.CommandContext(cctx, bin, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = t.stdout()
+	cmd.Stderr = t.stderr()
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), formatEnv(env)...)
 	}

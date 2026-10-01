@@ -112,3 +112,22 @@ internal/ui/
 2. 生成的 config.json 直接被 `protector -config` 消费结果一致（幂等回灌测试）；
 3. 密钥明文不出现在任何 TUI 屏幕、config 产物与 shell history；
 4. `internal/ui/form.go` 表驱动测试覆盖全部字段校验分支。
+
+## 5. 实现状态（2026-10）
+
+**已按本设计落地**（详见 [ROADMAP P0](../ROADMAP.md)）：
+
+- `protector ui` 五步向导：`internal/ui`（model.go 状态机、view.go 渲染、form.go 纯逻辑、autodetect.go build-tools 探测、state.go 跨运行记忆）；
+- 密钥字段仅收环境变量名；预览/写盘的配置保留 `${VAR}` 引用（依赖已实现的 P0.3 展开）；
+- headless `-profile quick|full|sign-only`（`internal/presets`）与非 TTY 退出码 2 降级；
+- 子进程输出经 `Tool.Stdout/Stderr` 注入缓冲，失败时展示尾部日志，不再撕裂 TUI 画面。
+
+**与 §4 设计的偏差**：
+
+| 设计 | 实际 | 原因 |
+|------|------|------|
+| `internal/ui/screens/` 子包 | `internal/ui` 单包，每 screen 独立文件（model.go/view.go） | 共享表单状态，Elm 子模型拆包带来额外管道 |
+| state 位于 `~/.config/protector/state.json` | `os.UserConfigDir()/protector/state.json`（macOS 下为 `~/Library/Application Support`） | 遵循平台惯例 |
+| S4 的 git work tree 检查 | 实现为**警告级**（可继续执行） | 不少合法工作流就在仓库内出包 |
+
+**尚未实现**：S5 完成后一键复制命令行、配置 diff 视图（当前为整份 JSON 预览）。

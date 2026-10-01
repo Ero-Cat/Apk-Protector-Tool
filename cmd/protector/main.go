@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/Ero-Cat/Apk-Protector-Tool/internal/app"
+	"github.com/Ero-Cat/Apk-Protector-Tool/internal/presets"
+	"github.com/Ero-Cat/Apk-Protector-Tool/internal/ui"
 )
 
 type sliceFlag []string
@@ -27,8 +29,21 @@ func (s *sliceFlag) Set(value string) error {
 }
 
 func main() {
+	// `protector ui` starts the interactive wizard before flag parsing.
+	if len(os.Args) > 1 && os.Args[1] == "ui" {
+		if err := ui.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "ui:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	var (
 		configPath       = flag.String("config", "", "Optional YAML/JSON configuration file")
+		profileName      = flag.String("profile", "", "Preset baseline applied on top of the config file: quick (scan+align+sign), full (all protections+align+sign+verify) or sign-only (align+sign). Explicit flags below still win")
+		protectSecretEnv = flag.String("protect-secret-env", "", "Name of the environment variable holding the dex encryption secret (keeps secrets out of shell history)")
+		storePassEnv     = flag.String("store-pass-env", "", "Name of the environment variable holding the keystore password")
+		keyPassEnv       = flag.String("key-pass-env", "", "Name of the environment variable holding the key password (defaults to the store password)")
 		inputAPK         = flag.String("input", "", "Path to the source APK that needs hardening")
 		finalOutput      = flag.String("output", "", "Destination path for the fully processed APK")
 		workDir          = flag.String("workdir", "", "Directory used for intermediate artifacts (defaults to the OS temp dir)")
@@ -63,9 +78,11 @@ func main() {
 	flag.Var(&signingExtraArgs, "sign-arg", "Repeatable flag that appends a raw argument to apksigner")
 
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options]\\n\\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options]\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "       %s ui   (interactive wizard)\n\n", os.Args[0])
 		fmt.Fprintln(flag.CommandLine.Output(), "The tool automates APK reinforcement (via an optional command) and V1+V2 signing.")
 		fmt.Fprintln(flag.CommandLine.Output(), "Paths provided through flags are resolved relative to the current working directory.")
+		fmt.Fprintln(flag.CommandLine.Output(), "Config values support ${VAR} and ${VAR:-default} environment references.")
 		fmt.Fprintln(flag.CommandLine.Output(), "")
 		flag.PrintDefaults()
 	}
@@ -77,7 +94,15 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	applyOverrides(cfg, applyArgs{
+	if *profileName != "" {
+		profile, err := presets.Parse(*profileName)
+		if err != nil {
+			log.Fatalf("profile: %v", err)
+		}
+		presets.Apply(profile, cfg)
+	}
+
+	args := applyArgs{
 		inputAPK:         *inputAPK,
 		finalOutput:      *finalOutput,
 		workDir:          *workDir,
@@ -89,6 +114,9 @@ func main() {
 		pseudoEncrypt:    *pseudoEncrypt,
 		packagePrefix:    *packagePrefix,
 		protectSecret:    *protectSecret,
+		protectSecretEnv: *protectSecretEnv,
+		storePassEnv:     *storePassEnv,
+		keyPassEnv:       *keyPassEnv,
 		reinforceCmd:     *reinforceCmd,
 		reinforceArgs:    reinforceArgs,
 		reinforceEnv:     reinforceEnv,
@@ -105,7 +133,11 @@ func main() {
 		reportPath:       *reportPath,
 		signingExtraArgs: signingExtraArgs,
 		verification:     *verificationStep,
-	})
+	}
+
+	if err := applyOverrides(cfg, args); err != nil {
+		log.Fatalf("apply flags: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -139,6 +171,9 @@ type applyArgs struct {
 	dexEncrypt       bool
 	compressEncrypt  bool
 	pseudoEncrypt    bool
+	protectSecretEnv string
+	storePassEnv     string
+	keyPassEnv       string
 	packagePrefix    string
 	protectSecret    string
 	reinforceCmd     string
@@ -158,7 +193,31 @@ type applyArgs struct {
 	verification     bool
 }
 
-func applyOverrides(cfg *app.Config, args applyArgs) {
+func applyOverrides(cfg *app.Config, args applyArgs) error {
+	// Env-name flags resolve at startup so secrets never appear on the
+	// command line or in shell history.
+	if args.protectSecretEnv != "" {
+		value, err := lookupEnvValue(args.protectSecretEnv, "dex encryption secret")
+		if err != nil {
+			return err
+		}
+		cfg.Protections.EncryptionSecret = value
+	}
+	if args.storePassEnv != "" {
+		value, err := lookupEnvValue(args.storePassEnv, "keystore password")
+		if err != nil {
+			return err
+		}
+		cfg.Signing.StorePass = value
+	}
+	if args.keyPassEnv != "" {
+		value, err := lookupEnvValue(args.keyPassEnv, "key password")
+		if err != nil {
+			return err
+		}
+		cfg.Signing.KeyPass = value
+	}
+
 	if args.inputAPK != "" {
 		cfg.InputAPK = args.inputAPK
 	}
@@ -251,4 +310,15 @@ func applyOverrides(cfg *app.Config, args applyArgs) {
 	if args.verification {
 		cfg.Verification.Enabled = true
 	}
+	return nil
+}
+
+// lookupEnvValue resolves an env-name flag; an unset variable is a hard error
+// naming both the variable and what it was needed for.
+func lookupEnvValue(name, purpose string) (string, error) {
+	value, ok := os.LookupEnv(name)
+	if !ok || value == "" {
+		return "", fmt.Errorf("environment variable %s (%s) is not set — export it before running protector", name, purpose)
+	}
+	return value, nil
 }
