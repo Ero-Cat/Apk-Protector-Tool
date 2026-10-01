@@ -159,9 +159,9 @@ func defaults(c *Config) {
 	if c.VMP.Levels.Critical == "" {
 		c.VMP.Levels.Critical = c.VMP.VMs[len(c.VMP.VMs)-1].Name
 	}
-	if c.VMP.StaticKey == "" {
-		c.VMP.StaticKey = "c0ffee42"
-	}
+	// StaticKey 默认留空：staticKeyByte() 此时取 0x5A，与运行时
+	// g_static_key 的默认一致。显式配置 static_key 时，应用侧必须经
+	// goprotect_set_static_key 注册同一值，否则字节码无法解密。
 	if c.VMP.Levels.FunctionVM == nil {
 		c.VMP.Levels.FunctionVM = map[string]string{}
 	}

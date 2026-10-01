@@ -28,6 +28,7 @@ func (p *Pipeline) Run(m *llvmwrap.Module) error {
 	if m == nil {
 		return fmt.Errorf("module is nil")
 	}
+	p.ensureStrRegionsTable(m)
 	if p.cfg != nil && p.cfg.Debug.DumpCFG {
 		p.writeDot("dump-cfg-before.dot", m)
 	}
@@ -48,6 +49,28 @@ func (p *Pipeline) Run(m *llvmwrap.Module) error {
 		p.writeDot("dump-cfg-after.dot", m)
 	}
 	return nil
+}
+
+// ensureStrRegionsTable guarantees the __gp_str_regions externs exist whenever
+// any pass ran: the linked runtime references them unconditionally, so a
+// module processed with (say) virtualization only must still define the
+// symbols. ConstObfPass emits the real table itself — skip it here to avoid
+// duplicate globals.
+func (p *Pipeline) ensureStrRegionsTable(m *llvmwrap.Module) {
+	if len(p.passes) == 0 {
+		return
+	}
+	for _, pass := range p.passes {
+		if _, ok := pass.(*ConstObfPass); ok {
+			return
+		}
+	}
+	for _, g := range m.Globals() {
+		if g.Name() == "__gp_str_regions" {
+			return
+		}
+	}
+	m.EmitStrRegionsTable("__gp_str_regions", nil)
 }
 
 // writeDot dumps the module CFG next to the configured output (cwd when no
@@ -81,6 +104,13 @@ func BuildPipeline(cfg *config.Config, rpt *report.Report) *Pipeline {
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	passes := []Pass{}
+	// Virtualize must run FIRST: it compiles pristine function bodies, and
+	// any instrumentation inserted before it (hook calls, constant wraps,
+	// allocas) makes the body un-compilable for the VM — with the old order
+	// the default config could never virtualize anything.
+	if cfg.Passes.Virtualization {
+		passes = append(passes, &VirtualizePass{Cfg: cfg, Rand: rnd, Report: rpt})
+	}
 	if cfg.Passes.EntryExit {
 		passes = append(passes, &EntryExitPass{Cfg: cfg, Report: rpt})
 	}
@@ -95,9 +125,6 @@ func BuildPipeline(cfg *config.Config, rpt *report.Report) *Pipeline {
 	}
 	if cfg.Passes.ConstObfuscation {
 		passes = append(passes, &ConstObfPass{Cfg: cfg, Rand: rnd, Report: rpt})
-	}
-	if cfg.Passes.Virtualization {
-		passes = append(passes, &VirtualizePass{Cfg: cfg, Rand: rnd, Report: rpt})
 	}
 	if cfg.Passes.SecurityHooks {
 		passes = append(passes, &SecurityHooksPass{Cfg: cfg, Report: rpt})

@@ -28,10 +28,13 @@ func (f functionImpl) basicBlocks() []BasicBlock                             { r
 func (f functionImpl) appendBasicBlock(string) BasicBlock                    { return BasicBlock{} }
 func (f functionImpl) typ() ValueType                                        { return ValueType{} }
 func (f functionImpl) returnType() ValueType                                 { return ValueType{} }
+func (f functionImpl) paramCount() int                                       { return 0 }
+func (f functionImpl) param(int) Value                                       { return Value{} }
 func (f functionImpl) asValue() valueImpl                                    { return valueImpl{} }
 func (bb basicBlockImpl) instructions() []Instruction                        { return nil }
 func (bb basicBlockImpl) moveBefore(BasicBlock)                              {}
 func (bb basicBlockImpl) successors() []BasicBlock                           { return nil }
+func (bb basicBlockImpl) delete()                                            {}
 func (bb basicBlockImpl) name() string                                       { return "" }
 func (i instructionImpl) opcode() string                                     { return "" }
 func (i instructionImpl) replaceAllUsesWith(Instruction)                     {}
@@ -52,6 +55,7 @@ func (b builderImpl) createICmpEq(Value, Value, string) Instruction          { r
 func (b builderImpl) createBr(BasicBlock) Instruction                        { return Instruction{} }
 func (b builderImpl) createCondBr(Value, BasicBlock, BasicBlock) Instruction { return Instruction{} }
 func (b builderImpl) createRetVoid() Instruction                             { return Instruction{} }
+func (b builderImpl) createRet(Value) Instruction                            { return Instruction{} }
 func (b builderImpl) createBitCast(Value, ValueType, string) Instruction     { return Instruction{} }
 func (b builderImpl) dispose()                                               {}
 func (b builderImpl) setInsertPointAtEnd(BasicBlock)                         {}

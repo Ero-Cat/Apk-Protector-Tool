@@ -89,17 +89,26 @@ typedef void (*goprotect_hook_cb)(int event);
 void goprotect_set_hook_callback(goprotect_hook_cb cb);
 
 /**
- * VM 字节码入口（加密版本）
+ * VM 字节码入口（P2.3 ABI v2，统一符号）
  *
- * 每个 VM 有一个对应入口。编译期生成的字节码经过 opcode 随机化与 XOR
- * 加密；运行时从元数据读取 bytecode_len / key_pad / opcodes 解码表，
- * 解密后解释执行。
+ * 编译期生成的字节码经过 opcode 随机化与 XOR 加密；入口从元数据读取
+ * bytecode_len / key_pad / opcodes 解码表 / param_count，解密后把 a0..a3
+ * 播种进 VM locals 再解释执行。VM 选择烘焙在字节码数据里（随机化映射与
+ * key_pad），与符号无关——自定义 VM 名不会产生链接期陷阱。
  *
  * @param bytecode 加密的字节码指针（NUL 结尾的全局数组）
  * @param meta     元数据 JSON 字符串指针（NUL 结尾的全局数组）
+ * @param a0..a3   虚拟化函数的实参（不足 4 个时高位为填充零）
+ * @return         RET_VALUE 弹出的返回值；void 虚拟化为 0
  */
-void __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode, const char* meta);
-void __goprotect_vm_entry_encrypted_vm_b(const uint8_t* bytecode, const char* meta);
+int32_t __goprotect_vm_entry_encrypted(const uint8_t* bytecode, const char* meta,
+                                       int32_t a0, int32_t a1, int32_t a2, int32_t a3);
+
+/* 历史别名（旧管线按 VM 名铸造符号），保留同签名以兼容既有产物。 */
+int32_t __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode, const char* meta,
+                                            int32_t a0, int32_t a1, int32_t a2, int32_t a3);
+int32_t __goprotect_vm_entry_encrypted_vm_b(const uint8_t* bytecode, const char* meta,
+                                            int32_t a0, int32_t a1, int32_t a2, int32_t a3);
 
 /**
  * 注册静态密钥片段（与编译期 vmp.static_key 的末字节一致，默认 0x5A）。

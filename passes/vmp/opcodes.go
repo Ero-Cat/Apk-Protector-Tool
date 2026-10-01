@@ -49,6 +49,9 @@ const (
 	OP_CMP_ULE Opcode = 0x48 // 无符号小于等于
 	OP_CMP_UGE Opcode = 0x49 // 无符号大于等于
 
+	// 带返回值退出：弹出栈顶作为 VM 入口的返回值（P2.3）
+	OP_RET_VALUE Opcode = 0x4A
+
 	// 控制流
 	OP_JMP Opcode = 0x50 // 无条件跳转（2 字节偏移）
 	OP_JZ  Opcode = 0x51 // 栈顶为 0 则跳转
@@ -96,16 +99,17 @@ var BaseOpcodes = map[Opcode]OpcodeInfo{
 
 	OP_STORE_LOCAL: {"STORE_LOCAL", 2, 1}, // op + 1B slot index
 
-	OP_CMP_EQ:  {"CMP_EQ", 1, 0},
-	OP_CMP_NE:  {"CMP_NE", 1, 0},
-	OP_CMP_LT:  {"CMP_LT", 1, 0},
-	OP_CMP_LE:  {"CMP_LE", 1, 0},
-	OP_CMP_GT:  {"CMP_GT", 1, 0},
-	OP_CMP_GE:  {"CMP_GE", 1, 0},
-	OP_CMP_ULT: {"CMP_ULT", 1, 0},
-	OP_CMP_UGT: {"CMP_UGT", 1, 0},
-	OP_CMP_ULE: {"CMP_ULE", 1, 0},
-	OP_CMP_UGE: {"CMP_UGE", 1, 0},
+	OP_CMP_EQ:    {"CMP_EQ", 1, 0},
+	OP_CMP_NE:    {"CMP_NE", 1, 0},
+	OP_CMP_LT:    {"CMP_LT", 1, 0},
+	OP_CMP_LE:    {"CMP_LE", 1, 0},
+	OP_CMP_GT:    {"CMP_GT", 1, 0},
+	OP_CMP_GE:    {"CMP_GE", 1, 0},
+	OP_CMP_ULT:   {"CMP_ULT", 1, 0},
+	OP_CMP_UGT:   {"CMP_UGT", 1, 0},
+	OP_CMP_ULE:   {"CMP_ULE", 1, 0},
+	OP_CMP_UGE:   {"CMP_UGE", 1, 0},
+	OP_RET_VALUE: {"RET_VALUE", 1, 0}, // 弹出栈顶作为返回值并停机
 
 	OP_JMP: {"JMP", 3, 1}, // op + 2B offset
 	OP_JZ:  {"JZ", 3, 1},

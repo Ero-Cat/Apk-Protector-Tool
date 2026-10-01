@@ -23,8 +23,8 @@ type Compiler struct {
 	locals    map[string]uint8
 	nextLocal uint8
 
-	// 参数表：参数索引 -> 槽位
-	params map[int]uint8
+	// 参数表：参数 Value RefID -> 参数槽（运行时把入口实参播种进 locals[0..n)）
+	params map[uintptr]uint8
 
 	// 基本块标签表：块 Value RefID -> 稳定标签名
 	blockNames map[uintptr]string
@@ -48,7 +48,7 @@ func NewCompiler(r *rand.Rand) *Compiler {
 		nextExtID:  0,
 		locals:     make(map[string]uint8),
 		nextLocal:  0,
-		params:     make(map[int]uint8),
+		params:     make(map[uintptr]uint8),
 		blockNames: make(map[uintptr]string),
 		defSlots:   make(map[uintptr]uint8),
 	}
@@ -63,23 +63,38 @@ type CompileResult struct {
 	ParamCount int               // 参数数量
 }
 
+// MaxLocals 与 runtime/src/vm_entry.c 的 VM_LOCAL_SIZE 一致；超出即拒绝编译
+// （C 侧 locals 数组越界是静默 UB，必须在编译期拦下）。
+const MaxLocals = 64
+
 // Compile 编译函数为字节码。
 //
 // 值模型：每个产生值的 SSA 指令绑定一个局部槽——操作数按定义指令解析为
-// PUSH_LOCAL（或常量 PUSH_CONST），指令执行后 STORE_LOCAL 写回自己的槽。
-// 访存/调用/phi 等当前不支持的指令直接报错，由上层跳过该函数（保守策略：
-// 要么语义正确地虚拟化，要么明确不虚拟化，绝不产出算错的字节码）。
+// PUSH_LOCAL（或常量 PUSH_CONST、参数 PUSH_ARG），指令执行后 STORE_LOCAL 写回
+// 自己的槽。访存/调用/phi 等当前不支持的指令直接报错，由上层跳过该函数
+// （保守策略：要么语义正确地虚拟化，要么明确不虚拟化，绝不产出算错的字节码）。
 func (c *Compiler) Compile(fn llvmwrap.Function) (*CompileResult, error) {
 	// 重置编译状态
 	c.buf = NewBytecodeBuffer(c.mapper)
 	c.resolver = NewLabelResolver()
 	c.locals = make(map[string]uint8)
 	c.nextLocal = 0
+	c.params = make(map[uintptr]uint8)
 
 	blocks := fn.BasicBlocks()
 	if len(blocks) == 0 {
 		return nil, fmt.Errorf("function has no basic blocks")
 	}
+
+	// 参数占据 locals[0..n)：编译器槽位从 n 起分配，避免与参数冲突。
+	paramCount := fn.ParamCount()
+	if paramCount > 4 {
+		return nil, fmt.Errorf("%d params exceed the 4-slot VM entry ABI", paramCount)
+	}
+	for i := 0; i < paramCount; i++ {
+		c.params[fn.Param(i).RefID()] = uint8(i)
+	}
+	c.nextLocal = uint8(paramCount)
 
 	// 第一遍：块标签表（跳转回填目标）+ 指令结果槽位表（def-use 绑定）。
 	c.blockNames = make(map[uintptr]string)
@@ -91,6 +106,9 @@ func (c *Compiler) Compile(fn llvmwrap.Function) (*CompileResult, error) {
 				c.defSlots[inst.AsValue().RefID()] = c.allocLocal()
 			}
 		}
+	}
+	if int(c.nextLocal) > MaxLocals {
+		return nil, fmt.Errorf("function needs %d locals, VM supports %d", c.nextLocal, MaxLocals)
 	}
 
 	// 第二遍：编译指令
@@ -207,10 +225,19 @@ func (c *Compiler) compileInstruction(inst llvmwrap.Instruction) error {
 		}
 
 	case "ret":
-		if len(inst.Operands()) != 0 {
-			return fmt.Errorf("non-void ret not supported")
+		ops := inst.Operands()
+		if len(ops) == 0 {
+			c.buf.Emit(OP_RET)
+		} else {
+			// 带返回值：压栈 -> RET_VALUE（运行时弹出作为 VM 入口返回值）。
+			if len(ops) != 1 {
+				return fmt.Errorf("ret with %d operands", len(ops))
+			}
+			if err := c.pushValue(ops[0]); err != nil {
+				return err
+			}
+			c.buf.Emit(OP_RET_VALUE)
 		}
-		c.buf.Emit(OP_RET)
 
 	default:
 		if strings.HasPrefix(opcode, "llvm.") {
@@ -260,7 +287,7 @@ func (c *Compiler) pushOperands(inst llvmwrap.Instruction) error {
 }
 
 // pushValue 把一个 LLVM 值压栈：常量取立即数，SSA 值取其定义槽，
-// 其他（函数参数/全局）在当前 ABI 下不支持。
+// 函数参数取参数槽（入口实参由运行时播种进 locals[0..n)）。
 func (c *Compiler) pushValue(v llvmwrap.Value) error {
 	if isConst, val := v.IsConstInt(); isConst {
 		c.buf.Emit(OP_PUSH_CONST)
@@ -272,7 +299,12 @@ func (c *Compiler) pushValue(v llvmwrap.Value) error {
 		c.buf.EmitU8(slot)
 		return nil
 	}
-	return fmt.Errorf("operand is a function argument or global (unsupported until the VM entry ABI passes arguments, see ROADMAP P2.3)")
+	if slot, ok := c.params[v.RefID()]; ok {
+		c.buf.Emit(OP_PUSH_ARG)
+		c.buf.EmitU8(slot)
+		return nil
+	}
+	return fmt.Errorf("operand is a global or otherwise unsupported value (no defining instruction in scope)")
 }
 
 // emitStoreLocal 弹出栈顶写入槽位。

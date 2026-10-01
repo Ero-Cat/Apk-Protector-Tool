@@ -65,6 +65,10 @@ func (f *Function) AppendBasicBlock(name string) BasicBlock {
 func (f *Function) Type() ValueType       { return f.impl.typ() }
 func (f *Function) ReturnType() ValueType { return f.impl.returnType() }
 
+// ParamCount / Param expose the function's fixed parameters (P2.3 ABI).
+func (f *Function) ParamCount() int   { return f.impl.paramCount() }
+func (f *Function) Param(i int) Value { return f.impl.param(i) }
+
 func (bb *BasicBlock) Instructions() []Instruction { return bb.impl.instructions() }
 
 // Terminator returns the basic block's terminating instruction (every
@@ -76,6 +80,9 @@ func (bb *BasicBlock) Name() string                 { return bb.impl.name() }
 // AsValue exposes the basic block as a value so builders and branch-target
 // resolution can treat it uniformly.
 func (bb BasicBlock) AsValue() Value { return bb.impl.asValue() }
+
+// Delete removes an emptied basic block from its function.
+func (bb BasicBlock) Delete() { bb.impl.delete() }
 
 // Successors returns the terminator successor blocks (br/condbr/switch).
 func (bb BasicBlock) Successors() []BasicBlock { return bb.impl.successors() }
@@ -131,6 +138,9 @@ func (b Builder) CreateCondBr(cond Value, t, f BasicBlock) Instruction {
 	return b.impl.createCondBr(cond, t, f)
 }
 func (b Builder) CreateRetVoid() Instruction { return b.impl.createRetVoid() }
+
+// CreateRet builds a value-returning ret (P2.3 non-void virtualization).
+func (b Builder) CreateRet(v Value) Instruction { return b.impl.createRet(v) }
 func (b Builder) CreateBitCast(v Value, dst ValueType, name string) Instruction {
 	return b.impl.createBitCast(v, dst, name)
 }

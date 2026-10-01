@@ -219,18 +219,58 @@ func TestDumpCFGDOTStructure(t *testing.T) {
 	}
 }
 
-func TestVirtualizeVoidOnlyBaseline(t *testing.T) {
-	// Current ABI virtualizes only void functions without argument
-	// references; arith.ll has none, so nothing may change structurally.
-	// Flipped to assert real virtualization by P2.3.
+func TestVirtualizeNonVoidFunction(t *testing.T) {
+	// P2.3: add(i32,i32)->i32 is now virtualizable — body replaced by a
+	// unified-entry stub; loop (phi) and main stay native.
 	cfg := singlePassCfg(t, func(cfg *config.Config) {
 		cfg.Passes.Virtualization = true
 		cfg.Obfuscation.VirtualizeRatio = 100
 	})
 	m := runPipeline(t, "arith.ll", cfg)
 	ir := m.String()
-	if !strings.Contains(ir, "add nsw i32") {
-		t.Fatal("add function body vanished before non-void virtualization landed")
+
+	if !strings.Contains(ir, "__goprotect_vm_entry_encrypted(") {
+		t.Fatal("no call to the unified VM entry — nothing virtualized")
+	}
+	if strings.Contains(ir, "add nsw i32 %a, %b") {
+		t.Fatal("original add body still present after virtualization")
+	}
+	if !strings.Contains(ir, "phi i32") {
+		t.Fatal("loop function must stay native (phi unsupported)")
+	}
+
+	if lliAvailable() {
+		obj := runtimeObjPath()
+		if obj == "" {
+			t.Skip("GOPROTECT_TEST_RUNTIME_OBJ not set")
+		}
+		// main = add(3,4) via the real C VM + native loop(4) = 7 + 6 = 13.
+		if got := runLli(t, m, obj); got != 13 {
+			t.Fatalf("post-virtualize lli exit = %d, want 13", got)
+		}
+	}
+}
+
+func TestVirtualizeSkipsUnsupportedShapes(t *testing.T) {
+	// calltarget: twice() contains a call (unsupported) and must stay native;
+	// main is i32() with no params — virtualizable.
+	cfg := singlePassCfg(t, func(cfg *config.Config) {
+		cfg.Passes.Virtualization = true
+		cfg.Obfuscation.VirtualizeRatio = 100
+	})
+	m := runPipeline(t, "calltarget.ll", cfg)
+	ir := m.String()
+	if !strings.Contains(ir, "call i32 @helper") {
+		t.Fatal("twice() should stay native (contains a call)")
+	}
+	if lliAvailable() {
+		obj := runtimeObjPath()
+		if obj == "" {
+			t.Skip("GOPROTECT_TEST_RUNTIME_OBJ not set")
+		}
+		if got := runLli(t, m, obj); got != 42 {
+			t.Fatalf("post-virtualize lli exit = %d, want 42", got)
+		}
 	}
 }
 

@@ -10,7 +10,7 @@
 |------|------|--------|-----------|------|
 | [P0](#p0-加固-ux-与配置安全) | 加固 UX 与配置安全（protector） | 5 | M | ✅ 全部完成 |
 | [P1](#p1-vmp-端到端打通) | VMP 端到端 | 8 | L | ✅ 全部完成；真实 LLVM 链路已验证（lli 语义正确 + 真实 C 运行时执行） |
-| [P2](#p2-pass-正确性) | Pass 正确性 | 6 主条目 / 20 子项 | M–L | 🟢 P2.1、P2.6 完成；P2.2–P2.5 已细颗粒拆分推进中 |
+| [P2](#p2-pass-正确性) | Pass 正确性 | 6 主条目 / 20 子项 | M–L | ✅ 全部完成（P2.1–P2.6，真实 LLVM 链路 lli 语义验证） |
 | [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 主条目 / 11 子项 | M–L | ⏳ 已细颗粒拆分；host 可验证部分推进中 |
 | [P4](#p4-测试基建) | 测试基建 | 2 主条目 / 7 子项 | M | ⏳ 已细颗粒拆分 |
 
@@ -190,18 +190,20 @@
 - **P2.2.4 C 侧解密真实现** ✅（hooks.c + goprotect.h 区域结构）
 - **P2.2.5 测试锚定** ✅（两侧 CI 绿）
 
-### P2.3 virtualize 完整虚拟化（非 void + 参数 + 旧体擦除）⏳
+### P2.3 virtualize 完整虚拟化（非 void + 参数 + 旧体擦除）✅ 已实现
 
-> 现状：`passes/virtualize.go` 仅接纳"void 返回 + 零参数引用 + 纯整型算术"函数；旧函数体原样保留（体积与信息泄露双输）；入口符号按 VM 名铸造而 C 侧只有 vm_a/vm_b 两个硬编码实现（自定义 VM 名静默链接失败）。
-
-- **P2.3.1 ISA 扩展 OP_RET_VALUE** ⏳：Go opcodes.go、C kOpcodeTable + 解释器 case、一致性测试三处同步。
-- **P2.3.2 llvmwrap 缺失 API** ⏳：`Function.ParamCount()/Param(i)`、`Builder.CreateRet(v)`、`BasicBlock.Delete()`（native+mock+facade）。
-- **P2.3.3 编译器参数模型** ⏳：Compile 预扫描填 `params[RefID]→槽`；`pushValue` 命中参数引用 → `OP_PUSH_ARG`；元数据 `param_count` 真实化（当前恒 0）。
-- **P2.3.4 ret 带值编译** ⏳：`ret v` → pop + `OP_RET_VALUE`；资格收紧：参数全 i32 且 ≤4 个、返回 i32 或 void（i64 等截断风险类型保守跳过）。
-- **P2.3.5 入口 ABI v2（统一符号）** ⏳：统一为 `__goprotect_vm_entry_encrypted(i8*, i8*, i32×4) → i32`；vm_a/vm_b 保留同签名别名；C 侧把 a0..a3 播种进 locals；消除自定义 VM 名链接陷阱。
-- **P2.3.6 旧函数体擦除** ⏳：逆序（块逆序 × 块内指令逆序；phi 已排除保证支配序安全）erase 指令再删空块；新体 = 调用入口 + ret。
-- **P2.3.7 测试锚定** ⏳：test_vm.c 增 retval/args 用例；llvm-tagged 断言非 void 虚拟化后 IR 无原指令且 lli 语义正确。
-- **验收标准（整条）**：`virtualize_ratio` 覆盖非 void 函数；模块 verify 通过；产物不含原函数体；lli 语义与原函数一致。
+> **落地情况**（2026-10）：
+> 1. **ISA**——`OP_RET_VALUE(0x4A)` 三处同步（Go opcodes / C 表+case / 一致性测试）；
+> 2. **llvmwrap**——`Function.ParamCount()/Param(i)`、`Builder.CreateRet(v)`、`BasicBlock.Delete()`；
+> 3. **编译器参数模型**——参数占据 locals[0..n)，编译器槽位从 n 起分配；`PUSH_ARG` 解析参数引用；`param_count` 元数据真实化；新增 `MaxLocals=64` 编译期上限（防 C 侧数组越界 UB）；
+> 4. **ret 带值**——`ret v` → 压栈 + `RET_VALUE`；资格收紧：返回 void/i32、参数全 i32 且 ≤4（i64 截断风险保守跳过）；
+> 5. **ABI v2**——统一符号 `__goprotect_vm_entry_encrypted(i8*, i8*, i32×4) → i32`（vm_a/vm_b 保留同签名别名），自定义 VM 名不再有链接陷阱；C 侧入口把实参播种进 locals、回传 retval；
+> 6. **旧体擦除**——逆序（块逆序×指令逆序，phi 已排除保证支配序）抹掉全部指令再删空块，原指令不再残留在产物；
+> 7. **测试**——test_vm.c 增 retval/args 用例；llvm-tagged 断言非 void 虚拟化后 IR 无原指令、lli 经真实 C 运行时语义正确（add(3,4) 由 VM 执行）。
+>
+> **过程中发现并修复的两个潜伏缺陷**：
+> - **密钥错配**——默认 `static_key: c0ffee42` 末字节 0x32 ≠ C 侧默认 0x5A，默认配置产出的字节码永远解不开；现默认留空（两侧统一 0x5A），显式配置时应用须 `goprotect_set_static_key` 注册同值；
+> - **pass 顺序缺陷**——virtualize 原排在 entry_exit 之后，而钩子调用会让函数不可编译：默认配置下 virtualize **从未**生效过。现 virtualize 排管线第一位（编译原始函数体，插桩类 pass 在其后处理剩余原生函数）。
 
 ### P2.4 `--dump-cfg` DOT 导出 ✅ 已实现
 

@@ -66,6 +66,7 @@
 #define OP_CMP_UGT 0x47
 #define OP_CMP_ULE 0x48
 #define OP_CMP_UGE 0x49
+#define OP_RET_VALUE 0x4A
 
 #define OP_JMP 0x50
 #define OP_JZ  0x51
@@ -113,6 +114,7 @@ static const opcode_entry_t kOpcodeTable[] = {
     {"CMP_UGT",    OP_CMP_UGT},
     {"CMP_ULE",    OP_CMP_ULE},
     {"CMP_UGE",    OP_CMP_UGE},
+    {"RET_VALUE",  OP_RET_VALUE},
     {"JMP",        OP_JMP},
     {"JZ",         OP_JZ},
     {"JNZ",        OP_JNZ},
@@ -126,11 +128,12 @@ static const opcode_entry_t kOpcodeTable[] = {
 typedef struct {
     int32_t stack[VM_STACK_SIZE];
     int sp;                         /* 栈指针 */
-    int32_t locals[VM_LOCAL_SIZE];  /* 局部变量 */
+    int32_t locals[VM_LOCAL_SIZE];  /* 局部变量（前 param_count 个为入口实参） */
     const uint8_t* bytecode;        /* 解码并解密后的字节码 */
     size_t bytecode_len;            /* 字节码长度（来自元数据） */
     size_t ip;                      /* 指令指针 */
     int halted;                     /* 停止标志 */
+    int32_t retval;                 /* RET_VALUE 弹出的返回值 */
     uint8_t decode[256];            /* 随机化字节 -> 标准 opcode */
 } vm_context_t;
 
@@ -483,6 +486,12 @@ static void vm_execute(vm_context_t* ctx) {
             ctx->halted = 1;
             break;
 
+        case OP_RET_VALUE:
+            /* 弹出栈顶作为 VM 入口的返回值并停机。 */
+            ctx->retval = VM_POP(ctx);
+            ctx->halted = 1;
+            break;
+
         default:
             LOGW("vm: unknown opcode 0x%02x (raw 0x%02x) at ip=%zu\n", op, raw, ctx->ip - 1);
             ctx->halted = 1;
@@ -492,27 +501,30 @@ static void vm_execute(vm_context_t* ctx) {
 }
 
 /**
- * 共享 VM 入口：解析元数据 -> 构建解码表 -> 解密 -> 解释执行。
+ * 共享 VM 入口：解析元数据 -> 构建解码表 -> 解密 -> 播种实参 -> 解释执行。
+ * 返回 RET_VALUE 弹出的值（void 虚拟化为 0）。
  */
-static void vm_entry_run(const uint8_t* bytecode, const char* meta) {
+static int32_t vm_entry_run(const uint8_t* bytecode, const char* meta,
+                            int32_t a0, int32_t a1, int32_t a2, int32_t a3) {
     vm_context_t ctx;
     memset(&ctx, 0, sizeof(ctx));
 
     size_t len = (size_t)json_int_of(meta, "\"bytecode_len\"", 0);
     int encrypted = json_bool_of(meta, "\"encrypted\"", 0);
     uint8_t key_pad = (uint8_t)json_int_of(meta, "\"key_pad\"", 0);
+    int param_count = json_int_of(meta, "\"param_count\"", 0);
     json_build_decode(meta, ctx.decode);
 
     if (len == 0) {
         LOGE("vm: metadata missing bytecode_len, refusing to run\n");
-        return;
+        return 0;
     }
 
     /* 解密到独立缓冲区：模块内的全局字节码是只读的。 */
     uint8_t* code = (uint8_t*)malloc(len);
     if (code == NULL) {
         LOGE("vm: out of memory for %zu bytes of bytecode\n", len);
-        return;
+        return 0;
     }
     memcpy(code, bytecode, len);
     if (encrypted) {
@@ -522,29 +534,49 @@ static void vm_entry_run(const uint8_t* bytecode, const char* meta) {
         }
     }
 
+    /* 入口实参播种进 locals[0..n)：与编译期 params 槽位约定一致。 */
+    int32_t args[4] = {a0, a1, a2, a3};
+    if (param_count > 4) {
+        param_count = 4;
+    }
+    for (int i = 0; i < param_count; i++) {
+        ctx.locals[i] = args[i];
+    }
+
     ctx.bytecode = code;
     ctx.bytecode_len = len;
     ctx.ip = 0;
     ctx.sp = 0;
     ctx.halted = 0;
+    ctx.retval = 0;
 
     vm_execute(&ctx);
 
+    int32_t rv = ctx.retval;
     free(code);
+    return rv;
 }
 
 /**
- * VM 入口点 - VM A（加密版本）
+ * 统一 VM 入口（P2.3 ABI v2）：i32 (i8* bc, i8* meta, i32 a0..a3)。
+ * VM 选择烘焙在字节码的随机化映射与 key_pad 里，不再按符号区分。
  */
-void __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode, const char* meta) {
-    vm_entry_run(bytecode, meta);
+int32_t __goprotect_vm_entry_encrypted(const uint8_t* bytecode, const char* meta,
+                                       int32_t a0, int32_t a1, int32_t a2, int32_t a3) {
+    return vm_entry_run(bytecode, meta, a0, a1, a2, a3);
 }
 
 /**
- * VM 入口点 - VM B（加密版本；opcode 映射按各自元数据独立解码）
+ * 历史别名（旧管线按 VM 名铸造符号）：保留同签名以兼容既有产物。
  */
-void __goprotect_vm_entry_encrypted_vm_b(const uint8_t* bytecode, const char* meta) {
-    vm_entry_run(bytecode, meta);
+int32_t __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode, const char* meta,
+                                            int32_t a0, int32_t a1, int32_t a2, int32_t a3) {
+    return vm_entry_run(bytecode, meta, a0, a1, a2, a3);
+}
+
+int32_t __goprotect_vm_entry_encrypted_vm_b(const uint8_t* bytecode, const char* meta,
+                                            int32_t a0, int32_t a1, int32_t a2, int32_t a3) {
+    return vm_entry_run(bytecode, meta, a0, a1, a2, a3);
 }
 
 /**

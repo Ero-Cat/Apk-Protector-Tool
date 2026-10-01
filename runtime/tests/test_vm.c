@@ -50,7 +50,8 @@ static void build_program(test_program_t* tp, const uint8_t* plain, size_t n,
 
 static const char* kPairs =
     "\"PUSH_CONST\":17,\"STORE_LOCAL\":34,\"PUSH_LOCAL\":51,"
-    "\"ADD\":16,\"CALL_EXT\":68,\"RET\":85,\"JMP\":86,\"CMP_LT\":4";
+    "\"ADD\":16,\"CALL_EXT\":68,\"RET\":85,\"JMP\":86,\"CMP_LT\":4,"
+    "\"PUSH_ARG\":29,\"RET_VALUE\":71";
 
 void test_slot_value_model(void) {
     test_program_t tp;
@@ -67,7 +68,7 @@ void test_slot_value_model(void) {
     g_captured = -1;
     g_ext_calls = 0;
     assert(goprotect_register_ext_func(0, test_ext) == 0);
-    __goprotect_vm_entry_encrypted_vm_a(tp.bytes, tp.meta);
+    __goprotect_vm_entry_encrypted_vm_a(tp.bytes, tp.meta, 0, 0, 0, 0);
 
     assert(g_ext_calls == 1);
     assert(g_captured == 42);
@@ -90,7 +91,7 @@ void test_arithmetic(void) {
 
     g_captured = -1;
     g_ext_calls = 0;
-    __goprotect_vm_entry_encrypted_vm_b(tp.bytes, tp.meta);
+    __goprotect_vm_entry_encrypted_vm_b(tp.bytes, tp.meta, 0, 0, 0, 0);
 
     assert(g_ext_calls == 1);
     assert(g_captured == 7);
@@ -107,7 +108,7 @@ void test_missing_meta_refuses(void) {
     memcpy(p, "\"Xytecode_len\"", 14);
 
     g_ext_calls = 0;
-    __goprotect_vm_entry_encrypted_vm_a(tp.bytes, tp.meta);
+    __goprotect_vm_entry_encrypted_vm_a(tp.bytes, tp.meta, 0, 0, 0, 0);
     assert(g_ext_calls == 0); /* 必须拒绝执行 */
     printf("test_missing_meta_refuses: PASS\n");
 }
@@ -119,9 +120,54 @@ void test_identity_fallback(void) {
     snprintf(meta, sizeof meta, "{\"bytecode_len\":%zu,\"encrypted\":false}", sizeof code);
     g_captured = -1;
     g_ext_calls = 0;
-    __goprotect_vm_entry_encrypted_vm_a(code, meta);
+    __goprotect_vm_entry_encrypted_vm_a(code, meta, 0, 0, 0, 0);
     assert(g_captured == 9);
     printf("test_identity_fallback: PASS (unencrypted, standard opcodes)\n");
+}
+
+/* P2.3：RET_VALUE 把栈顶作为入口返回值。 */
+void test_ret_value(void) {
+    test_program_t tp;
+    /* PUSH_CONST 41; PUSH_CONST 1; ADD; RET_VALUE */
+    uint8_t plain[] = {
+        0x01, 41, 0, 0, 0,
+        0x01, 1, 0, 0, 0,
+        0x10,                /* ADD */
+        0x4A,                /* RET_VALUE */
+    };
+    build_program(&tp, plain, sizeof plain, kPairs, /*pad=*/0x11);
+
+    int32_t rv = __goprotect_vm_entry_encrypted(tp.bytes, tp.meta, 0, 0, 0, 0);
+    assert(rv == 42);
+    printf("test_ret_value: PASS (entry returned %d)\n", rv);
+}
+
+/* P2.3：入口实参播种进 locals，PUSH_ARG 取回。 */
+void test_args_passthrough(void) {
+    test_program_t tp;
+    /* PUSH_ARG 0; PUSH_ARG 1; ADD; RET_VALUE */
+    uint8_t plain[] = {
+        0x02, 0,
+        0x02, 1,
+        0x10,
+        0x4A,
+    };
+    char pairs[512];
+    snprintf(pairs, sizeof pairs, "%s", kPairs);
+    /* param_count=2：a0/a1 播种进 locals[0..2)。 */
+    uint8_t key = key_of(0x42);
+    for (size_t i = 0; i < sizeof plain; i++) {
+        tp.bytes[i] = (uint8_t)(plain[i] ^ key);
+    }
+    tp.len = sizeof plain;
+    snprintf(tp.meta, sizeof tp.meta,
+             "{\"bytecode_len\":%zu,\"encrypted\":true,\"key_pad\":66,"
+             "\"local_count\":8,\"param_count\":2,\"opcodes\":{%s}}",
+             sizeof plain, pairs);
+
+    int32_t rv = __goprotect_vm_entry_encrypted(tp.bytes, tp.meta, 20, 22, 0, 0);
+    assert(rv == 42);
+    printf("test_args_passthrough: PASS (20 + 22 = %d)\n", rv);
 }
 
 int main(void) {
@@ -129,6 +175,8 @@ int main(void) {
     test_arithmetic();
     test_missing_meta_refuses();
     test_identity_fallback();
+    test_ret_value();
+    test_args_passthrough();
     printf("all vm tests passed\n");
     return 0;
 }

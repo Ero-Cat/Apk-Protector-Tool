@@ -213,6 +213,14 @@ func (f functionImpl) returnType() ValueType {
 	return ValueType{impl: valueTypeImpl{ref: ret}}
 }
 
+func (f functionImpl) paramCount() int {
+	return int(C.LLVMCountParams(f.ref))
+}
+
+func (f functionImpl) param(i int) Value {
+	return Value{impl: valueImpl{ref: C.LLVMGetParam(f.ref, C.uint(i))}}
+}
+
 func (f functionImpl) asValue() valueImpl { return valueImpl{ref: f.ref} }
 
 func (bb basicBlockImpl) instructions() []Instruction {
@@ -244,6 +252,12 @@ func (bb basicBlockImpl) successors() []BasicBlock {
 		}
 	}
 	return out
+}
+
+// delete removes the (empty) basic block from its function. Callers must
+// first erase every instruction — including terminators that reference it.
+func (bb basicBlockImpl) delete() {
+	C.LLVMDeleteBasicBlock(bb.ref)
 }
 
 func (bb basicBlockImpl) name() string {
@@ -461,6 +475,11 @@ func (b builderImpl) createCondBr(cond Value, t, f BasicBlock) Instruction {
 
 func (b builderImpl) createRetVoid() Instruction {
 	inst := C.LLVMBuildRetVoid(b.ref)
+	return Instruction{impl: instructionImpl{ref: inst}}
+}
+
+func (b builderImpl) createRet(v Value) Instruction {
+	inst := C.LLVMBuildRet(b.ref, v.impl.ref)
 	return Instruction{impl: instructionImpl{ref: inst}}
 }
 
