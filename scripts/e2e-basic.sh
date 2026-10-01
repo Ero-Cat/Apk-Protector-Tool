@@ -71,6 +71,8 @@ echo "==> optional: C interpreter unit tests"
 if command -v clang >/dev/null 2>&1; then
   clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
     runtime/tests/test_vm.c -o "$WORK/test_vm" && "$WORK/test_vm"
+  clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
+    runtime/tests/test_hooks.c -o "$WORK/test_hooks" && "$WORK/test_hooks"
 else
   echo "clang not found, skipping"
 fi

@@ -85,6 +85,80 @@ func (m moduleImpl) functions() []Function {
 	return out
 }
 
+// globals enumerates the module's global variables.
+func (m moduleImpl) globals() []Value {
+	out := []Value{}
+	for g := C.LLVMGetFirstGlobal(m.ref); g != nil; g = C.LLVMGetNextGlobal(g) {
+		out = append(out, Value{impl: valueImpl{ref: g}})
+	}
+	return out
+}
+
+// addGlobalBytes adds a private, WRITABLE i8-array global. Used for
+// string-encryption ciphertext that the runtime decrypts in place — the
+// writable linkage is what keeps in-place XOR legal.
+func (m moduleImpl) addGlobalBytes(name string, data []byte) Value {
+	cname := cstring(name)
+	defer C.free(unsafe.Pointer(cname))
+	cstr := (*C.char)(C.CBytes(data))
+	defer C.free(unsafe.Pointer(cstr))
+	// DontNullTerminate=1: the payload length is exactly len(data).
+	constStr := C.LLVMConstString(cstr, C.uint(len(data)), C.LLVMBool(1))
+	ty := C.LLVMArrayType(C.LLVMInt8Type(), C.uint(len(data)))
+	gv := C.LLVMAddGlobal(m.ref, ty, cname)
+	C.LLVMSetInitializer(gv, constStr)
+	C.LLVMSetGlobalConstant(gv, 0)
+	C.LLVMSetLinkage(gv, C.LLVMPrivateLinkage)
+	return Value{impl: valueImpl{ref: gv}}
+}
+
+// emitStrRegionsTable emits the extern-visible `<name>` array plus
+// `<name>_count` describing encrypted string regions for the C runtime.
+// Layout: { ptr, i32, i8 } — must stay in sync with
+// goprotect_str_region_t in runtime/include/goprotect.h.
+// A null placeholder slot is emitted for the zero-region case so the runtime
+// externs always resolve alongside the decrypt call the same pass inserts.
+func (m moduleImpl) emitStrRegionsTable(name string, regions []StrRegion) {
+	i8ptr := C.LLVMPointerType(C.LLVMInt8Type(), 0)
+	elems := []C.LLVMTypeRef{i8ptr, C.LLVMInt32Type(), C.LLVMInt8Type()}
+	structTy := C.LLVMStructType(&elems[0], 3, 0)
+
+	n := len(regions)
+	slotCount := n
+	if slotCount == 0 {
+		slotCount = 1
+	}
+	parts := make([]C.LLVMValueRef, 0, slotCount)
+	if n == 0 {
+		empty := []C.LLVMValueRef{
+			C.LLVMConstPointerNull(i8ptr),
+			C.LLVMConstInt(C.LLVMInt32Type(), 0, 0),
+			C.LLVMConstInt(C.LLVMInt8Type(), 0, 0),
+		}
+		parts = append(parts, C.LLVMConstStruct(&empty[0], 3, 0))
+	} else {
+		for _, r := range regions {
+			fields := []C.LLVMValueRef{
+				r.Data.impl.ref, // opaque pointers: a global's address is a ptr
+				C.LLVMConstInt(C.LLVMInt32Type(), C.ulonglong(uint32(r.Length)), 0),
+				C.LLVMConstInt(C.LLVMInt8Type(), C.ulonglong(r.Key), 0),
+			}
+			parts = append(parts, C.LLVMConstStruct(&fields[0], 3, 0))
+		}
+	}
+	arr := C.LLVMConstArray(structTy, &parts[0], C.uint(slotCount))
+
+	cname := cstring(name)
+	defer C.free(unsafe.Pointer(cname))
+	gv := C.LLVMAddGlobal(m.ref, C.LLVMTypeOf(arr), cname)
+	C.LLVMSetInitializer(gv, arr)
+
+	countName := cstring(name + "_count")
+	defer C.free(unsafe.Pointer(countName))
+	cg := C.LLVMAddGlobal(m.ref, C.LLVMInt32Type(), countName)
+	C.LLVMSetInitializer(cg, C.LLVMConstInt(C.LLVMInt32Type(), C.ulonglong(n), 0))
+}
+
 func (m moduleImpl) addGlobalString(name string, data []byte) Value {
 	cname := cstring(name)
 	defer C.free(unsafe.Pointer(cname))
@@ -447,6 +521,68 @@ func (v valueImpl) refID() uintptr { return uintptr(unsafe.Pointer(v.ref)) }
 
 func (v valueImpl) typ() ValueType {
 	return ValueType{impl: valueTypeImpl{ref: C.LLVMTypeOf(v.ref)}}
+}
+
+// users enumerates the values using this one (LLVM use chains).
+func (v valueImpl) users() []Value {
+	out := []Value{}
+	for u := C.LLVMGetFirstUse(v.ref); u != nil; u = C.LLVMGetNextUse(u) {
+		out = append(out, Value{impl: valueImpl{ref: C.LLVMGetUser(u)}})
+	}
+	return out
+}
+
+// isInstruction reports whether the value is an instruction (class-cast
+// probe); constant expressions and other non-instruction users return false.
+func (v valueImpl) isInstruction() bool {
+	return C.LLVMIsAInstruction(v.ref) != nil
+}
+
+func (v valueImpl) isPrivateLinkage() bool {
+	return C.LLVMGetLinkage(v.ref) == C.LLVMPrivateLinkage
+}
+
+func (v valueImpl) isGlobalConstant() bool {
+	return C.LLVMIsGlobalConstant(v.ref) != 0
+}
+
+func (v valueImpl) initializer() Value {
+	return Value{impl: valueImpl{ref: C.LLVMGetInitializer(v.ref)}}
+}
+
+// deleteGlobal destroys the global variable; it must have no remaining uses.
+func (v valueImpl) deleteGlobal() {
+	C.LLVMDeleteGlobal(v.ref)
+}
+
+// constantDataArrayBytes returns the exact byte contents (including any
+// trailing NUL) of a ConstantDataArray of i8, e.g. a c"..." literal.
+func (v valueImpl) constantDataArrayBytes() ([]byte, bool) {
+	if C.LLVMIsAConstantDataArray(v.ref) == nil {
+		return nil, false
+	}
+	ty := C.LLVMTypeOf(v.ref)
+	if C.LLVMGetTypeKind(ty) != C.LLVMArrayTypeKind {
+		return nil, false
+	}
+	elemTy := C.LLVMGetElementType(ty)
+	if C.LLVMGetTypeKind(elemTy) != C.LLVMIntegerTypeKind || C.LLVMGetIntTypeWidth(elemTy) != 8 {
+		return nil, false
+	}
+	n := int(C.LLVMGetArrayLength(ty))
+	out := make([]byte, n)
+	for i := 0; i < n; i++ {
+		el := C.LLVMGetAggregateElement(v.ref, C.uint(i))
+		if el == nil {
+			return nil, false
+		}
+		out[i] = byte(C.LLVMConstIntGetZExtValue(el))
+	}
+	return out, true
+}
+
+func (v valueImpl) asInstruction() Instruction {
+	return Instruction{impl: instructionImpl{ref: v.ref}}
 }
 
 func constIntImpl(v int64, bits uint) Value {

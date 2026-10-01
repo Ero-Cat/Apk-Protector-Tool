@@ -19,7 +19,10 @@ func (m moduleImpl) verify() error                                           { r
 func (m moduleImpl) string() string                                          { return "" }
 func (m moduleImpl) dispose()                                                {}
 func (m moduleImpl) functions() []Function                                   { return nil }
+func (m moduleImpl) globals() []Value                                        { return nil }
 func (m moduleImpl) addGlobalString(string, []byte) Value                    { return Value{} }
+func (m moduleImpl) addGlobalBytes(string, []byte) Value                     { return Value{} }
+func (m moduleImpl) emitStrRegionsTable(string, []StrRegion)                 {}
 func (f functionImpl) name() string                                          { return "" }
 func (f functionImpl) basicBlocks() []BasicBlock                             { return nil }
 func (f functionImpl) appendBasicBlock(string) BasicBlock                    { return BasicBlock{} }
@@ -66,6 +69,16 @@ func (v valueImpl) isConstInt() (bool, uint64) { return false, 0 }
 func (v valueImpl) typ() ValueType             { return ValueType{} }
 func (v valueImpl) name() string               { return "" }
 func (v valueImpl) refID() uintptr             { return 0 }
+func (v valueImpl) users() []Value             { return nil }
+func (v valueImpl) isInstruction() bool        { return false }
+func (v valueImpl) isPrivateLinkage() bool     { return false }
+func (v valueImpl) isGlobalConstant() bool     { return false }
+func (v valueImpl) initializer() Value         { return Value{} }
+func (v valueImpl) constantDataArrayBytes() ([]byte, bool) {
+	return nil, false
+}
+func (v valueImpl) deleteGlobal()              {}
+func (v valueImpl) asInstruction() Instruction { return Instruction{} }
 func constIntImpl(int64, uint) Value           { return Value{} }
 func constBoolImpl(bool) Value                 { return Value{} }
 func (m moduleImpl) ensureFunction(string, ValueType, []ValueType) Function {

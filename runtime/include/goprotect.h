@@ -58,9 +58,26 @@ void __goprotect_anti_debug(void);
 void __goprotect_hook(void);
 
 /**
- * 字符串解密存根（ConstObfPass 插入）
+ * 字符串解密（ConstObfPass 插入）
+ *
+ * Pass 会把可安全改写的私有字符串全局替换为加密可写全局，并生成
+ * __gp_str_regions 区域表；本函数按表原位 XOR 还原（一次性，幂等守卫）。
  */
 void __goprotect_decrypt_strings(void);
+
+/**
+ * 加密字符串区域表（由 ConstObfPass 生成的模块定义，运行时只读）。
+ * 结构布局必须与 Go 侧 llvmwrap.EmitStrRegionsTable 的 { ptr, i32, i8 }
+ * 保持一致。
+ */
+typedef struct goprotect_str_region {
+    const uint8_t* data; /* 加密数据（模块内可写全局） */
+    int32_t len;         /* 精确字节数（含 NUL） */
+    uint8_t key;         /* 单字节 XOR 密钥 */
+} goprotect_str_region_t;
+
+extern const goprotect_str_region_t __gp_str_regions[];
+extern const int32_t __gp_str_regions_count;
 
 /* 钩子事件类型 */
 #define GOPROTECT_HOOK_EVENT_ENTER 1

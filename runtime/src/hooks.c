@@ -39,10 +39,28 @@ void __goprotect_hook(void) {
 }
 
 /**
- * 字符串解密存根：ConstObfPass 在函数入口插入调用。
- * 完整方案在 P2.2（字面量真实改写）落地后按需解密；当前保持 no-op，
- * 保证与 goprotect 处理过的 bitcode 链接不出现未解析符号。
+ * 字符串解密：ConstObfPass 在函数入口插入调用。
+ *
+ * Pass 侧把私有字符串全局改写为加密可写全局并导出 __gp_str_regions
+ * 区域表（与本调用同 pass 产出，符号总是成对出现）；这里一次性遍历
+ * 表做原位 XOR 还原。表与调用由同一 pass 生成——count 为 0 时表内是
+ * 一个全零占位槽，循环自然空转。
  */
 void __goprotect_decrypt_strings(void) {
-    /* no-op: 字符串在 P2.2 之前不做编译期改写，无需运行时解密。 */
+    static int g_strings_decrypted = 0;
+    if (g_strings_decrypted != 0) {
+        return;
+    }
+    g_strings_decrypted = 1;
+
+    for (int32_t i = 0; i < __gp_str_regions_count; ++i) {
+        const goprotect_str_region_t* r = &__gp_str_regions[i];
+        if (r->data == NULL || r->len <= 0) {
+            continue;
+        }
+        uint8_t* bytes = (uint8_t*)(uintptr_t)r->data;
+        for (int32_t j = 0; j < r->len; ++j) {
+            bytes[j] ^= r->key;
+        }
+    }
 }

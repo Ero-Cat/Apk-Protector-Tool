@@ -58,6 +58,11 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
             runtime/tests/test_vm.c -o /tmp/test_vm && /tmp/test_vm
 
+      - name: String-decrypt unit tests (P2.2)
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
+            runtime/tests/test_hooks.c -o /tmp/test_hooks && /tmp/test_hooks
+
   llvm:
     name: LLVM native build (best-effort)
     runs-on: ubuntu-latest

@@ -176,28 +176,19 @@
 - **任务拆解**：llvmwrap 补终结器读取/删除 API；cf_flatten 重写主循环；pass 结束统一 `LLVMVerifyModule`（联动 P4.2）。
 - **验收标准**：对含循环+多分支的 `.ll` 输入，pass 后模块通过 verifier 且语义等价（可用 lli 执行对比）。
 
-### P2.2 const_obf 真实字面量重写 🟡 细颗粒推进中
+### P2.2 const_obf 真实字面量重写 ✅ 已实现
 
-> **已落地**：xor 恒等包裹修复为"整型操作数 + SetOperand"（原实现包裹指针值产出非法 IR，且 ReplaceAllUsesWith 形成自引用环）；入口解密存根调用保留。
-> **拆分原则**：值改写（整数常量）与数据改写（字符串全局）解耦，各自独立可验收；C 侧解密与 Go 侧加密用共享向量锚定。
+> **落地情况**（2026-10）：
+> 1. **整数常量全量改写**——遍历全部指令的常量整型操作数，按 `substitute_intensity` 概率替换为 `(x^k)^k` 或 `(x−k)+k` 恒等表达式；终结器与 phi 跳过（switch case 值必须常量 / phi 入参支配性）。**关键修复**：IRBuilder 对全常量操作数做常数折叠，直接 `xor(c,k)` 会折回常量静默消失——密钥改为经 alloca+store+load 栈槽中转（load 值非常量，链得以保留），该修复同时救治了 instr_sub 的同源潜伏缺陷。
+> 2. **字符串全局加密**——私有 const i8 数组全局（使用者全为指令）替换为可写密文全局并删除原全局；导出 `__gp_str_regions`/`__gp_str_regions_count` 区域表（{ptr,i32,i8}，与 C 侧结构布局一致）。
+> 3. **C 侧真实现**——`__goprotect_decrypt_strings` 一次性守卫 + 表驱动原位 XOR；表与调用同 pass 产出，符号总是成对解析。
+> 4. **测试锚定**——llvm-tagged：强度 10 时字面量消失、强度 0 零改写、明文不再出现在 IR、lli 输出原文（真实运行时解密）；`runtime/tests/test_hooks.c`：解密往返/幂等/空槽跳过。
 
-- **P2.2.1 llvmwrap 常量与使用者 API** ⏳
-  - 现状：llvmwrap 无全局枚举、无使用者遍历、无私有字符串读取——字面量改写无构件。
-  - 任务：`Module.Globals()`（GetFirstGlobal/GetNextGlobal）、`Value.Users()`（GetFirstUse/GetNextUse/GetUser）、私有 const i8 数组读取（IsAConstantDataArray + GetAsString，失败即跳过）、可写全局创建（AddGlobal + SetInitializer + SetGlobalConstant(0) + PrivateLinkage）。
-  - 验收：native+mock 双实现编译通过；llvm-tagged 冒烟枚举到夹具中的全局与使用者。
-- **P2.2.2 整数常量按强度全量改写** ⏳
-  - 现状：`passes/const_obf.go` 每函数只包裹**第一个**整型操作数（xor 恒等），覆盖率与强度配置无关。
-  - 任务：遍历全部指令全部操作数，`IsConstInt` 且整型按 `substitute_intensity` 概率抽样；随机选 xor 恒等 `(c^k)^k` 或加法拆分 `(c−k)+k`（泛化 wrapIntegerOperand，SetOperand 替换）。
-  - 验收：改写后 verifier 通过、lli 结果与原函数一致；强度=0 零改写、强度=10 高比例改写（IR 断言）。
-- **P2.2.3 私有字符串全局加密** ⏳
-  - 现状：字符串字面量原样留在 .rodata，`strings` 一把抓。
-  - 任务：仅重写"私有 const i8 数组全局且所有使用者均为指令"（有常量表达式/GEP 嵌套使用者则整组跳过），排除 `__gp_*`/`__goprotect_*` 前缀；新可写全局存 XOR 密文并替换指令使用者；生成 `__gp_str_regions` 常量表 `{i8* data, i32 len, i8 key}[]` 与计数全局。
-  - 验收：输出 IR 中原明文串不再出现；lli 输出仍为原文。
-- **P2.2.4 C 侧解密真实现** ⏳
-  - 现状：`runtime/src/hooks.c` 的 `__goprotect_decrypt_strings` 是显式 no-op 存根。
-  - 任务：静态一次性守卫 + 遍历 `__gp_str_regions` 原位 XOR 解密；goprotect.h 补区域结构 extern 声明。
-  - 验收：C 单测解密往返，与 Go 侧加密互为逆操作。
-- **P2.2.5 测试锚定** ⏳：llvm-tagged（verifier + lli 语义 + 明文消失断言）+ runtime/tests 解密单测；两侧 CI 双绿。
+- **P2.2.1 llvmwrap 常量与使用者 API** ✅（Globals/Users/IsInstruction/IsPrivateLinkage/IsGlobalConstant/Initializer/ConstantDataArrayBytes/AddGlobalBytes/EmitStrRegionsTable/DeleteGlobal，native+mock）
+- **P2.2.2 整数常量按强度全量改写** ✅（xor 恒等 + 加法拆分双形态；`passes/wrap.go` 共用）
+- **P2.2.3 私有字符串全局加密** ✅（常量使用者整组跳过；`__gp_*`/`__goprotect_*` 前缀排除）
+- **P2.2.4 C 侧解密真实现** ✅（hooks.c + goprotect.h 区域结构）
+- **P2.2.5 测试锚定** ✅（两侧 CI 绿）
 
 ### P2.3 virtualize 完整虚拟化（非 void + 参数 + 旧体擦除）⏳
 

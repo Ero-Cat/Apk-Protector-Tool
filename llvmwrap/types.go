@@ -34,6 +34,29 @@ func (m *Module) AddGlobalString(name string, data []byte) Value {
 	return m.impl.addGlobalString(name, data)
 }
 
+// Globals enumerates the module's global variables.
+func (m *Module) Globals() []Value { return m.impl.globals() }
+
+// AddGlobalBytes adds a private, WRITABLE i8-array global — the ciphertext
+// twin of a string literal that the runtime decrypts in place.
+func (m *Module) AddGlobalBytes(name string, data []byte) Value {
+	return m.impl.addGlobalBytes(name, data)
+}
+
+// StrRegion describes one encrypted string global for the C runtime.
+type StrRegion struct {
+	Data   Value
+	Length int32
+	Key    uint8
+}
+
+// EmitStrRegionsTable emits the extern-visible `<name>` / `<name>_count`
+// globals consumed by __goprotect_decrypt_strings. Layout { ptr, i32, i8 }
+// mirrors goprotect_str_region_t in runtime/include/goprotect.h.
+func (m *Module) EmitStrRegionsTable(name string, regions []StrRegion) {
+	m.impl.emitStrRegionsTable(name, regions)
+}
+
 func (f *Function) Name() string              { return f.impl.name() }
 func (f *Function) BasicBlocks() []BasicBlock { return f.impl.basicBlocks() }
 func (f *Function) AppendBasicBlock(name string) BasicBlock {
@@ -150,6 +173,22 @@ func (v Value) Name() string { return v.impl.name() }
 // RefID returns a stable identity for the underlying LLVM value, usable as
 // a map key even for unnamed values.
 func (v Value) RefID() uintptr { return v.impl.refID() }
+
+// Global-value introspection (P2.2 literal rewriting).
+func (v Value) Users() []Value         { return v.impl.users() }
+func (v Value) IsInstruction() bool    { return v.impl.isInstruction() }
+func (v Value) IsPrivateLinkage() bool { return v.impl.isPrivateLinkage() }
+func (v Value) IsGlobalConstant() bool { return v.impl.isGlobalConstant() }
+func (v Value) Initializer() Value     { return v.impl.initializer() }
+
+// DeleteGlobal destroys a global variable with no remaining uses — the
+// plaintext original after its users were redirected to the encrypted twin.
+func (v Value) DeleteGlobal()                          { v.impl.deleteGlobal() }
+func (v Value) ConstantDataArrayBytes() ([]byte, bool) { return v.impl.constantDataArrayBytes() }
+
+// AsInstruction reinterprets an instruction value; only valid when
+// IsInstruction() reports true.
+func (v Value) AsInstruction() Instruction { return v.impl.asInstruction() }
 
 // Constants
 func ConstInt(value int64, bits uint) Value { return constIntImpl(value, bits) }

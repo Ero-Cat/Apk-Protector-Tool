@@ -233,3 +233,61 @@ func TestVirtualizeVoidOnlyBaseline(t *testing.T) {
 		t.Fatal("add function body vanished before non-void virtualization landed")
 	}
 }
+
+func TestConstObfWrapsIntegerConstantsByIntensity(t *testing.T) {
+	// Intensity 10 (max): the direct literals feeding @add must disappear.
+	cfg := singlePassCfg(t, func(cfg *config.Config) {
+		cfg.Passes.ConstObfuscation = true
+		cfg.Obfuscation.SubstituteIntensity = 10
+	})
+	m := runPipeline(t, "arith.ll", cfg)
+	ir := m.String()
+	if strings.Contains(ir, "i32 3, i32 4") {
+		t.Fatal("direct constant operands survived max-intensity const-obf")
+	}
+	if lliAvailable() {
+		if got := runLli(t, m, runtimeObjPath()); got != 13 {
+			t.Fatalf("post-const-obf lli exit = %d, want 13", got)
+		}
+	}
+
+	// Intensity 0: zero rewrites, literals intact.
+	cfg0 := singlePassCfg(t, func(cfg *config.Config) {
+		cfg.Passes.ConstObfuscation = true
+		cfg.Obfuscation.SubstituteIntensity = 0
+	})
+	m0 := runPipeline(t, "arith.ll", cfg0)
+	if !strings.Contains(m0.String(), "i32 3, i32 4") {
+		t.Fatal("intensity 0 must not rewrite constants")
+	}
+}
+
+func TestConstObfEncryptsStringGlobals(t *testing.T) {
+	cfg := singlePassCfg(t, func(cfg *config.Config) {
+		cfg.Passes.ConstObfuscation = true
+		cfg.Obfuscation.SubstituteIntensity = 10
+	})
+	m := runPipeline(t, "strings.ll", cfg)
+	ir := m.String()
+
+	// Plaintext must be gone from the module, the region table must exist.
+	if strings.Contains(ir, "hello gp") || strings.Contains(ir, "bye!") {
+		t.Fatal("plaintext string constant survived const-obf")
+	}
+	if !strings.Contains(ir, "__gp_str_regions") || !strings.Contains(ir, "__gp_str_regions_count") {
+		t.Fatal("string region table not emitted")
+	}
+
+	// And the runtime must restore the exact bytes before printf runs.
+	if !lliAvailable() {
+		t.Skip("lli not in PATH")
+	}
+	obj := runtimeObjPath()
+	if obj == "" {
+		t.Skip("GOPROTECT_TEST_RUNTIME_OBJ not set")
+	}
+	out := lliOutput(t, m, obj)
+	if !strings.Contains(out, "hello gp 42!") || !strings.Contains(out, "bye!") {
+		t.Fatalf("decrypted output wrong: %q", out)
+	}
+}
