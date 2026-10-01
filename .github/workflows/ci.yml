@@ -79,6 +79,18 @@ jobs:
             runtime/android/tests/test_dex_decrypt.c runtime/android/dex_decrypt.c \
             runtime/android/crypto/aes_gcm.c -o /tmp/test_dex_decrypt && /tmp/test_dex_decrypt
 
+      # Android 主要目标架构是 aarch64；NDK 完整矩阵太重，先用 Linux 目标的
+      # 交叉编译捕捉可移植性回归（socket/格式串/头文件）。JNI 胶水在
+      # __ANDROID__ 门后，交叉到 linux-gnu 会得到空翻译单元，跳过。
+      - name: aarch64 cross-compile smoke
+        run: |
+          sudo apt-get install -y -q gcc-aarch64-linux-gnu
+          for f in runtime/src/*.c runtime/android/dex_decrypt.c runtime/android/crypto/aes_gcm.c; do
+            aarch64-linux-gnu-gcc -fsyntax-only -std=c11 -Wall -Wextra -Werror \
+              -I runtime/include -I runtime/android "$f"
+          done
+          echo "aarch64 cross-compile smoke passed"
+
   llvm:
     name: LLVM native build (best-effort)
     runs-on: ubuntu-latest
