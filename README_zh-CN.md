@@ -199,9 +199,12 @@ protector -profile full -input app-release.apk \
 ### `protector` — APK 加固 CLI
 
 ```
-protector -input <app.apk> [options]
-protector ui                                  # 交互向导
-protector -profile full -input <app.apk> ...  # headless 预设
+protector run  [options]      完整流水线（配置 + 预设 + flag）
+protector scan [options]      仅安全扫描
+protector sign [options]      对齐 + 签名（可加 -verify）
+protector ui                  交互向导
+protector config init         生成带注释的配置模板
+protector [options]           旧版扁平模式（已弃用，仍可用）
 ```
 
 #### 交互向导 — `protector ui`
@@ -236,7 +239,9 @@ protector -profile full -input app.apk \
 | `-output` | `dist/<名称>-protected.apk` | 最终产物路径 |
 | `-report` | — | JSON 运行报告输出路径 |
 | `-workdir` | 系统临时目录 | 每次运行临时目录的根 |
+| `-keep-workdir` | 关 | 保留中间运行目录便于排查 |
 | `-skip-scan` | 关 | 关闭预检安全扫描 |
+| `-verify` | 关 | 签名后执行 `apksigner verify --print-certs` |
 
 #### 保护参数
 
@@ -257,6 +262,7 @@ protector -profile full -input app.apk \
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `-zipalign` | PATH 上的 `zipalign` | zipalign 路径；设置即启用对齐 |
+| `-align-bytes` | 4 | zipalign 对齐字节数 |
 | `-apksigner` | PATH 上的 `apksigner` | apksigner 路径；设置即启用签名 |
 | `-keystore` | — | V1+V2 签名用 keystore |
 | `-store-pass` | — | keystore 密码 |
@@ -277,6 +283,7 @@ protector -profile full -input app.apk \
 | `-reinforce-output` | — | 加固器预期输出 APK |
 | `-reinforce-arg` | — | 传给加固器的参数（可重复；支持 `{{input_apk}}`、`{{output_apk}}`、`{{work_dir}}`、`{{ts}}` 模板） |
 | `-reinforce-env` | — | 加固器的 `KEY=VALUE` 环境变量（可重复） |
+| `-reinforce-timeout` | — | 加固器超时，如 `5m` |
 
 ### `goprotect` — IR 混淆 CLI
 

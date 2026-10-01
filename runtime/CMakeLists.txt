@@ -13,6 +13,7 @@ add_library(goprotect_runtime STATIC
     src/integrity.c
     src/antidebug.c
     src/vm_entry.c
+    src/hooks.c
 )
 
 target_include_directories(goprotect_runtime PUBLIC

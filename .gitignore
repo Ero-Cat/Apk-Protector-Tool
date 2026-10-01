@@ -46,6 +46,7 @@ report_text.txt
 
 # Config samples
 config.json
+protector.config.yml
 *.local.json
 *.secret.json
 *.secrets.json

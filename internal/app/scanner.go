@@ -80,6 +80,15 @@ var (
 	textExtensions = []string{".xml", ".json", ".txt", ".ini", ".properties", ".js", ".html", ".cfg", ".conf", ".yml", ".yaml"}
 )
 
+// effectiveKeywords returns the configured anti-environment keywords,
+// falling back to the built-in set when the config left them empty.
+func effectiveKeywords(configured []string) []string {
+	if len(configured) > 0 {
+		return configured
+	}
+	return antiEnvKeywords
+}
+
 func scanAPK(apkPath string, cfg ScanningConfig) (*ScanResults, error) {
 	reader, err := zip.OpenReader(apkPath)
 	if err != nil {
@@ -144,7 +153,7 @@ func scanAPK(apkPath string, cfg ScanningConfig) (*ScanResults, error) {
 				continue
 			}
 			content := bytes.ToLower(data)
-			for _, kw := range antiEnvKeywords {
+			for _, kw := range effectiveKeywords(cfg.Keywords) {
 				if bytes.Contains(content, []byte(strings.ToLower(kw))) {
 					antiEnvSet[kw] = struct{}{}
 				}

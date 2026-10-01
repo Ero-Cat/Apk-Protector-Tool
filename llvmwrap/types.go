@@ -49,11 +49,23 @@ func (bb *BasicBlock) TerminateWith(inst Instruction) { bb.impl.terminateWith(in
 func (bb *BasicBlock) MoveBefore(target BasicBlock)   { bb.impl.moveBefore(target) }
 func (bb *BasicBlock) Name() string                   { return bb.impl.name() }
 
+// AsValue exposes the basic block as a value so builders and branch-target
+// resolution can treat it uniformly.
+func (bb BasicBlock) AsValue() Value { return bb.impl.asValue() }
+
 func (i *Instruction) Opcode() string { return i.impl.opcode() }
 func (i *Instruction) ReplaceAllUsesWith(newInst Instruction) {
 	i.impl.replaceAllUsesWith(newInst)
 }
 func (i Instruction) Operands() []Value { return i.impl.operands() }
+
+// CalledValue returns the callee of a call instruction.
+func (i Instruction) CalledValue() Value { return i.impl.calledValue() }
+
+// ICmpPredicate returns the predicate of an icmp instruction
+// ("eq", "ne", "ugt", "uge", "ult", "ule", "sgt", "sge", "slt", "sle"),
+// or "" when the instruction is not an integer comparison.
+func (i Instruction) ICmpPredicate() string { return i.impl.icmpPredicate() }
 
 func NewBuilderAt(instr Instruction) Builder { return Builder{impl: newBuilderAtImpl(instr)} }
 func NewBuilderAtEnd(bb BasicBlock) Builder  { return Builder{impl: newBuilderAtEndImpl(bb)} }
@@ -112,6 +124,13 @@ func (f Function) AsValue() Value          { return Value{impl: f.impl.asValue()
 func (v Value) AsValue() Value             { return v }
 func (v Value) IsConstInt() (bool, uint64) { return v.impl.isConstInt() }
 func (v Value) Type() ValueType            { return v.impl.typ() }
+
+// Name returns the LLVM value name (function symbol, block label, …).
+func (v Value) Name() string { return v.impl.name() }
+
+// RefID returns a stable identity for the underlying LLVM value, usable as
+// a map key even for unnamed values.
+func (v Value) RefID() uintptr { return v.impl.refID() }
 
 // Constants
 func ConstInt(value int64, bits uint) Value { return constIntImpl(value, bits) }

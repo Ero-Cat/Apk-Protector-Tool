@@ -35,10 +35,13 @@ func (p *VirtualizePass) Run(m *llvmwrap.Module) error {
 	}
 
 	// 为每个 VM 生成对应入口符号，便于运行时区分。
+	// 入口接收 (bytecode, meta) 双参数：运行时需要元数据里的长度、密钥
+	// 片段与 opcode 解码表才能执行随机化后的字节码。
+	ptrType := llvmwrap.PointerType(llvmwrap.IntType(8))
 	vmEntryFns := map[string]llvmwrap.Function{}
 	for _, vm := range p.Cfg.VMP.VMs {
 		name := "__goprotect_vm_entry_encrypted_" + vm.Name
-		vmEntryFns[vm.Name] = m.EnsureFunction(name, llvmwrap.VoidType(), []llvmwrap.ValueType{llvmwrap.PointerType(llvmwrap.IntType(8))})
+		vmEntryFns[vm.Name] = m.EnsureFunction(name, llvmwrap.VoidType(), []llvmwrap.ValueType{ptrType, ptrType})
 	}
 
 	virtualizedCount := 0
@@ -82,18 +85,19 @@ func (p *VirtualizePass) Run(m *llvmwrap.Module) error {
 		}
 
 		// 加密字节码
-		enc, keyByte := p.encryptBytecode(result.Bytecode)
+		enc, keyPad := p.encryptBytecode(result.Bytecode)
 		gv := m.AddGlobalString("__gp_bc_"+fn.Name(), enc)
 
-		// 元数据：记录使用的 VM 名、build nonce、key 线索、外部函数表。
-		metaStr := []byte(p.metadataJSON(fn.Name(), vmName, keyByte, result))
-		_ = m.AddGlobalString("__gp_bc_meta_"+fn.Name(), metaStr)
+		// 元数据：记录 VM 名、build nonce、密钥片段、opcode 解码表与外部函数表。
+		metaStr := []byte(p.metadataJSON(fn.Name(), vmName, keyPad, result))
+		metaGv := m.AddGlobalString("__gp_bc_meta_"+fn.Name(), metaStr)
 
-		// 新入口：调用对应 VM 的加密入口。
+		// 新入口：调用对应 VM 的加密入口（字节码 + 元数据双参数）。
 		newEntry := fn.AppendBasicBlock("gp.vm.entry")
 		builder := llvmwrap.NewBuilderAtEnd(newEntry)
-		ptr := builder.CreateBitCast(gv.AsValue(), llvmwrap.PointerType(llvmwrap.IntType(8)), "bcptr")
-		builder.CreateCall(entry, []llvmwrap.Value{ptr.AsValue()})
+		bcPtr := builder.CreateBitCast(gv.AsValue(), ptrType, "bcptr")
+		metaPtr := builder.CreateBitCast(metaGv.AsValue(), ptrType, "metaptr")
+		builder.CreateCall(entry, []llvmwrap.Value{bcPtr.AsValue(), metaPtr.AsValue()})
 		builder.CreateRetVoid()
 		builder.Dispose()
 
@@ -108,24 +112,25 @@ func (p *VirtualizePass) Run(m *llvmwrap.Module) error {
 	return nil
 }
 
-// encryptBytecode：按单字节 XOR 方式加密，key 由静态片段与随机片段组成。
+// encryptBytecode：按单字节 XOR 方式加密。返回密文与随机片段 keyPad——
+// 最终密钥为 staticKeyByte() ^ keyPad，静态片段不落盘，运行时经
+// goprotect_set_static_key 注册后与元数据中的 keyPad 组合还原密钥。
 func (p *VirtualizePass) encryptBytecode(bc []byte) ([]byte, byte) {
-	key := p.deriveKeyByte()
+	keyPad := byte(p.Rand.Intn(256))
+	key := p.staticKeyByte() ^ keyPad
 	out := make([]byte, len(bc))
 	for i, b := range bc {
 		out[i] = b ^ key
 	}
-	return out, key
+	return out, keyPad
 }
 
-// deriveKeyByte：将静态 key 取最低 8bit，与随机片段异或得到最终 key。
-func (p *VirtualizePass) deriveKeyByte() byte {
-	static := byte(0x5a)
+// staticKeyByte：静态密钥片段（配置 StaticKey 的末字节，默认 0x5A）。
+func (p *VirtualizePass) staticKeyByte() byte {
 	if len(p.Cfg.VMP.StaticKey) > 0 {
-		static = p.Cfg.VMP.StaticKey[len(p.Cfg.VMP.StaticKey)-1]
+		return p.Cfg.VMP.StaticKey[len(p.Cfg.VMP.StaticKey)-1]
 	}
-	randByte := byte(p.Rand.Intn(256))
-	return static ^ randByte
+	return 0x5a
 }
 
 // pickVMFor：根据函数名与级别选择 VM。
@@ -148,26 +153,40 @@ func (p *VirtualizePass) pickVMFor(fn string) string {
 	return p.Cfg.VMP.Levels.Normal
 }
 
-// bytecodeMetadata 字节码元数据结构
+// bytecodeMetadata 字节码元数据结构。运行时依赖其中的 bytecode_len、
+// key_pad 与 opcodes 解码表才能执行（见 runtime/src/vm_entry.c）。
 type bytecodeMetadata struct {
 	Function    string            `json:"fn"`
 	VM          string            `json:"vm"`
 	BuildNonce  uint64            `json:"build_nonce"`
-	KeyHint     string            `json:"key_hint"`
 	BytecodeLen int               `json:"bytecode_len"`
 	LocalCount  int               `json:"local_count"`
+	ParamCount  int               `json:"param_count"`
+	Encrypted   bool              `json:"encrypted"`
+	KeyPad      uint8             `json:"key_pad"`
+	KeyHint     string            `json:"key_hint,omitempty"`
+	Opcodes     map[string]uint8  `json:"opcodes"`
 	ExtFuncs    map[string]uint16 `json:"ext_funcs,omitempty"`
 }
 
-// metadataJSON：生成结构化元数据 JSON。
-func (p *VirtualizePass) metadataJSON(fn, vm string, key byte, result *vmp.CompileResult) string {
+// metadataJSON：生成结构化元数据 JSON。Opcodes 为"标准助记符 -> 本次构建
+// 随机化字节"映射，运行时反转为解码表。
+func (p *VirtualizePass) metadataJSON(fn, vm string, keyPad byte, result *vmp.CompileResult) string {
+	opcodes := make(map[string]uint8, len(vmp.BaseOpcodes))
+	for op, info := range vmp.BaseOpcodes {
+		opcodes[info.Name] = byte(result.Mapper.Encode(op))
+	}
 	meta := bytecodeMetadata{
 		Function:    fn,
 		VM:          vm,
 		BuildNonce:  p.buildNonce,
-		KeyHint:     p.Cfg.VMP.RuntimeKeyHint,
 		BytecodeLen: len(result.Bytecode),
 		LocalCount:  result.LocalCount,
+		ParamCount:  result.ParamCount,
+		Encrypted:   true,
+		KeyPad:      keyPad,
+		KeyHint:     p.Cfg.VMP.RuntimeKeyHint,
+		Opcodes:     opcodes,
 		ExtFuncs:    result.ExtFuncs,
 	}
 	data, _ := json.Marshal(meta)

@@ -130,6 +130,26 @@ func defaults(c *Config) {
 	if len(c.VMP.VMs) == 0 {
 		c.VMP.VMs = []VMClass{{Name: "vm_a", ISA: "A"}, {Name: "vm_b", ISA: "B"}}
 	}
+	// enable_multi_vm=false 时折叠为单 VM：所有保护等级共用第一个 VM，
+	// 显式指向被移除 VM 的等级映射重定向到保留的 VM。
+	if !c.VMP.EnableMultiVM && len(c.VMP.VMs) > 1 {
+		c.VMP.VMs = c.VMP.VMs[:1]
+		kept := c.VMP.VMs[0].Name
+		if c.VMP.Levels.Normal != "" && c.VMP.Levels.Normal != kept {
+			c.VMP.Levels.Normal = kept
+		}
+		if c.VMP.Levels.Sensitive != "" && c.VMP.Levels.Sensitive != kept {
+			c.VMP.Levels.Sensitive = kept
+		}
+		if c.VMP.Levels.Critical != "" && c.VMP.Levels.Critical != kept {
+			c.VMP.Levels.Critical = kept
+		}
+		for fn, vm := range c.VMP.Levels.FunctionVM {
+			if vm != kept {
+				c.VMP.Levels.FunctionVM[fn] = kept
+			}
+		}
+	}
 	if c.VMP.Levels.Normal == "" {
 		c.VMP.Levels.Normal = c.VMP.VMs[0].Name
 	}

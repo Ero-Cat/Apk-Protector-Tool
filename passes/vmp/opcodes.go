@@ -43,6 +43,8 @@ const (
 	OP_CMP_GE  Opcode = 0x45
 	OP_CMP_ULT Opcode = 0x46 // 无符号小于
 	OP_CMP_UGT Opcode = 0x47 // 无符号大于
+	OP_CMP_ULE Opcode = 0x48 // 无符号小于等于
+	OP_CMP_UGE Opcode = 0x49 // 无符号大于等于
 
 	// 控制流
 	OP_JMP Opcode = 0x50 // 无条件跳转（2 字节偏移）
@@ -97,6 +99,8 @@ var BaseOpcodes = map[Opcode]OpcodeInfo{
 	OP_CMP_GE:  {"CMP_GE", 1, 0},
 	OP_CMP_ULT: {"CMP_ULT", 1, 0},
 	OP_CMP_UGT: {"CMP_UGT", 1, 0},
+	OP_CMP_ULE: {"CMP_ULE", 1, 0},
+	OP_CMP_UGE: {"CMP_UGE", 1, 0},
 
 	OP_JMP: {"JMP", 3, 1}, // op + 2B offset
 	OP_JZ:  {"JZ", 3, 1},

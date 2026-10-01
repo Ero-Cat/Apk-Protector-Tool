@@ -3,6 +3,7 @@ package vmp
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 )
 
 // BytecodeBuffer 提供字节码编码工具
@@ -116,13 +117,13 @@ func (r *LabelResolver) AddBackpatch(bp Backpatch) {
 	r.backpatch = append(r.backpatch, bp)
 }
 
-// Resolve 解析所有待回填跳转
+// Resolve 解析所有待回填跳转。未知标签是编译错误——静默落到 offset 0 会把
+// 条件跳转全部变成"跳回开头"，必须在编译期暴露。
 func (r *LabelResolver) Resolve(buf *BytecodeBuffer) error {
 	for _, bp := range r.backpatch {
 		targetOffset, ok := r.labels[bp.Target]
 		if !ok {
-			// 未知标签，使用 0
-			targetOffset = 0
+			return fmt.Errorf("unresolved branch target %q (patch offset %d)", bp.Target, bp.Offset)
 		}
 
 		var value int16

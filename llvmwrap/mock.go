@@ -32,6 +32,9 @@ func (bb basicBlockImpl) name() string                                       { r
 func (i instructionImpl) opcode() string                                     { return "" }
 func (i instructionImpl) replaceAllUsesWith(Instruction)                     {}
 func (i instructionImpl) operands() []Value                                  { return nil }
+func (i instructionImpl) calledValue() Value                                 { return Value{} }
+func (i instructionImpl) icmpPredicate() string                              { return "" }
+func (bb basicBlockImpl) asValue() Value                                     { return Value{} }
 func newBuilderAtImpl(Instruction) builderImpl                               { return builderImpl{} }
 func newBuilderAtEndImpl(BasicBlock) builderImpl                             { return builderImpl{} }
 func (b builderImpl) createCall(Function, []Value) Instruction               { return Instruction{} }
@@ -57,6 +60,8 @@ func (s switchInstImpl) addCase(Value, BasicBlock) {}
 func (i instructionImpl) asValue() valueImpl   { return valueImpl{} }
 func (v valueImpl) isConstInt() (bool, uint64) { return false, 0 }
 func (v valueImpl) typ() ValueType             { return ValueType{} }
+func (v valueImpl) name() string               { return "" }
+func (v valueImpl) refID() uintptr             { return 0 }
 func constIntImpl(int64, uint) Value           { return Value{} }
 func constBoolImpl(bool) Value                 { return Value{} }
 func (m moduleImpl) ensureFunction(string, ValueType, []ValueType) Function {

@@ -113,6 +113,10 @@ func (t *Tool) Run(ctx context.Context) (*Report, error) {
 		return nil, fmt.Errorf("input apk: %w", err)
 	}
 
+	if err := t.preflight(t.cfg.InputAPK); err != nil {
+		return nil, err
+	}
+
 	baseName := strings.TrimSuffix(filepath.Base(t.cfg.InputAPK), filepath.Ext(t.cfg.InputAPK))
 
 	workRoot := t.cfg.WorkDir
@@ -219,6 +223,61 @@ func (t *Tool) Run(ctx context.Context) (*Report, error) {
 	return report, nil
 }
 
+// transformsOutput reports whether any stage will rewrite the APK. Scan-only
+// runs copy the input unchanged, so implicit zipalign does not apply.
+func (t *Tool) transformsOutput() bool {
+	return t.cfg.Protections.Enabled || t.cfg.Reinforce.Enabled || t.cfg.Signing.Enabled
+}
+
+// preflight verifies that every external binary the run will need actually
+// exists before any work starts, so failures surface as actionable errors
+// instead of a late crash in the middle of the pipeline. It also covers the
+// implicit zipalign requirement for APKs that ship native libs.
+func (t *Tool) preflight(inputAPK string) error {
+	if t.cfg.Signing.Enabled {
+		if err := checkBinary(t.cfg.Signing.ApksignerPath); err != nil {
+			return fmt.Errorf("signing: %w", err)
+		}
+		if !fileExists(t.cfg.Signing.Keystore) && t.cfg.Signing.CreateKeystore {
+			if err := checkBinary(t.cfg.Signing.KeytoolPath); err != nil {
+				return fmt.Errorf("keystore generation: %w", err)
+			}
+		}
+	}
+	needAlign := t.cfg.Zipalign.Enabled
+	if !needAlign && t.transformsOutput() {
+		hasNativeLibs, err := apkContainsNativeLibs(inputAPK)
+		if err != nil {
+			return fmt.Errorf("inspect apk for zipalign: %w", err)
+		}
+		needAlign = hasNativeLibs
+	}
+	if needAlign {
+		if err := checkBinary(t.cfg.Zipalign.Path); err != nil {
+			return fmt.Errorf("alignment (required for APKs with native libs): %w", err)
+		}
+	}
+	return nil
+}
+
+// checkBinary validates an external tool path: explicit paths must exist,
+// bare names are looked up on PATH.
+func checkBinary(name string) error {
+	if name == "" {
+		return fmt.Errorf("tool path is empty")
+	}
+	if strings.ContainsRune(name, os.PathSeparator) || strings.ContainsRune(name, '/') {
+		if _, err := os.Stat(name); err != nil {
+			return fmt.Errorf("%s not found — install Android build-tools or set an explicit path", name)
+		}
+		return nil
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return fmt.Errorf("%q not found in PATH — install Android build-tools or set an explicit path via config/flags", name)
+	}
+	return nil
+}
+
 func (t *Tool) runScanning(apkPath string, report *Report) error {
 	if !t.cfg.Scanning.Enabled {
 		return nil
@@ -298,6 +357,10 @@ func (t *Tool) runZipalign(ctx context.Context, currentApk, baseName, runDir str
 	cfg := t.cfg.Zipalign
 	autoEnabled := false
 	if !cfg.Enabled {
+		if !t.transformsOutput() {
+			// Scan-only 等纯复制运行：产物不变，无需对齐。
+			return "", nil
+		}
 		hasNativeLibs, err := apkContainsNativeLibs(currentApk)
 		if err != nil {
 			return "", fmt.Errorf("inspect apk for zipalign: %w", err)

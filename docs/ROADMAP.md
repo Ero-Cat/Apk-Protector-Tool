@@ -8,8 +8,8 @@
 
 | 阶段 | 主题 | 条目数 | 预估工作量 | 状态 |
 |------|------|--------|-----------|------|
-| [P0](#p0-加固-ux-与配置安全) | 加固 UX 与配置安全（protector） | 5 | M | 🟢 P0.1/P0.3/P0.4 已完成，P0.2 部分完成 |
-| [P1](#p1-vmp-端到端打通) | VMP 端到端 | 7 | L | ⏳ 设计完成 |
+| [P0](#p0-加固-ux-与配置安全) | 加固 UX 与配置安全（protector） | 5 | M | ✅ 全部完成 |
+| [P1](#p1-vmp-端到端打通) | VMP 端到端 | 7 | L | ✅ 全部完成（端到端真机验收待 P3.3/P4.2 配合） |
 | [P2](#p2-pass-正确性) | Pass 正确性 | 6 | M–L | ⏳ 部分实现 |
 | [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 | M | ⏳ 骨架就绪 |
 | [P4](#p4-测试基建) | 测试基建 | 2 | M | ⏳ 策略已定未落地 |
@@ -35,9 +35,9 @@
   4. 生成 config 前展示 diff 预览，确认后写入 `config.json` 或直接调用 `app.Tool.Run`。
 - **验收标准**：`protector ui` 在不读文档的情况下 3 步内完成一次完整加固；`TERM=dumb` 或 CI 环境自动降级为报错提示改用 `-profile`。
 
-### P0.2 CLI 重构：子命令 + 预设（`-profile`）🟡 部分完成
+### P0.2 CLI 重构：子命令 + 预设（`-profile`）✅ 已实现
 
-> **落地情况**：`-profile quick|full|sign-only` 预设与 `protector ui` 子命令分发已实现（`cmd/protector/main.go` + `internal/presets`）。剩余：`run|scan|sign|config init` 完整子命令化、flag 与配置文件的"独占项"对齐、扁平 flag 兼容期的弃用警告。
+> **落地情况**：完整子命令化已交付——`protector run|scan|sign|ui|config init`。scan 强制仅扫描、sign 强制仅对齐+签名；旧扁平模式完全兼容并打印弃用警告；补齐了配置独占项的 flag 等价物（`-keep-workdir`、`-reinforce-timeout`、`-align-bytes`）；`config init` 生成带注释 YAML 模板（密钥一律 `${VAR}` 引用）。
 
 - **现状**：单命令扁平 28 flag；配置文件选项与 flag 分裂（`keep_work_dir`、`reinforce.timeout`、`zipalign.alignment`、keystore 生成参数等只能走配置文件）；`-protect-dex` 与 `-protect-multi-dex` 语义重叠。
 - **目标**：分组子命令 `protector run|scan|sign|config init` + 内置预设 `-profile quick|full|sign-only`，常见路径压缩到 1–3 个参数。
@@ -69,7 +69,12 @@
 - **任务拆解**：main.go 加 3 个 flag；`applyOverrides` 中 env 变体优先于明文变体；文档更新。
 - **验收标准**：`protector …-store-pass-env APK_STORE_PASS` 与 `-store-pass` 行为一致；两者同传时 env 优先并打印提示。
 
-### P0.5 覆盖语义与死配置修复 🔴 正确性
+### P0.5 覆盖语义与死配置修复 🔴 正确性 ✅ 已实现
+
+> **落地情况**：
+> 1. 覆盖语义——`flag.Visit` 识别显式传入的参数，显式 `-protect=false` 可关闭配置启用的选项，并连带清掉非显式子开关（防止 finalize 隐式复活）；
+> 2. 预检——`Tool.preflight` 在管线启动前校验 apksigner/keytool/zipalign（含隐式要求），给出可行动报错；语义细化：**纯扫描等不改写产物的运行不再隐式要求 zipalign**（对齐仅当保护/加固/签名会改写产物时自动启用）；
+> 3. 死配置——`scanning.keywords` 已接入 scanner（空则回退内置表，有测试锚定）；`vmp.enable_multi_vm=false` 折叠为单 VM 并重映射等级。
 
 - **现状**（三处独立问题）：
   1. `applyOverrides`（`cmd/protector/main.go:161-254`）只能把配置项从关改开，CLI 无法关闭配置中开启的选项（`-skip-scan` 是唯一例外）；
@@ -88,49 +93,63 @@
 
 > 现状一句话：编译器、字节码格式、C 解释器三件套各有简化与脱节，端到端（Go 编译 → 元数据 → C 解码执行）从未跑通。以下 7 项按依赖顺序排列。
 
-### P1.1 opcode 映射导出到元数据
+### P1.1 opcode 映射导出到元数据 ✅ 已实现
+
+> **落地情况**：`bytecodeMetadata` 新增 `opcodes`（标准助记符→随机化字节）、`encrypted`、`key_pad`、`param_count` 字段，`metadataJSON` 序列化 `CompileResult.Mapper`；形状测试锚定（`passes/virtualize_meta_test.go`）。
 
 - **现状**：`passes/vmp/opcodes.go:120-146` 每次构建随机化 opcode 映射，但 `passes/virtualize.go:163-175` 写 `__gp_bc_meta_<fn>` 元数据 JSON 时**漏发 Mapper**——运行时拿不到映射，无法解码任何指令。
 - **目标**：元数据包含完整 opcode→byte 映射、字节码长度、VM 名、加密标志。
 - **任务拆解**：扩展 meta JSON schema（`opcodes`、`len`、`encrypted`）；`virtualize.go` 序列化 `Mapper`；`runtime/src/vm_entry.c` 解析后建查找表。
 - **验收标准**：C 端能按元数据还原与编译期一致的指令解码表（单测：同一 meta JSON 两侧解析结果一致）。
 
-### P1.2 C 解释器补齐缺失 opcode
+### P1.2 C 解释器补齐缺失 opcode ✅ 已实现
+
+> **落地情况**：解释器改为经 **decode[256] 表**把随机化字节还原为标准 opcode 后再 dispatch（此前静态 switch 根本无法解码任何随机化指令）；补齐 `OP_CMP_ULT/UGT/ULE/UGE`（ISA 同步扩展 0x48/0x49）；Go/C 两侧 opcode 表一致性由 `passes/vmp/opcodes_consistency_test.go` 构建期校验（值+助记符+switch 覆盖三重断言）。
 
 - **现状**：`opcodes.go` 定义了 `0x46 OP_CMP_ULT`、`0x47 OP_CMP_UGT`、`OP_PUSH_ARG`，`runtime/src/vm_entry.c` 的 dispatch 循环**没有对应 case**（grep 零命中）——执行到即 `unknown opcode` 停机。
 - **目标**：解释器覆盖编译器可产出的全部指令。
 - **任务拆解**：vm_entry.c 补 3 个 case；建立"opcode 清单单一事实源"（Go 侧生成、C 侧包含的共享头/表）防再脱节。
 - **验收标准**：Go 侧遍历 `OpcodeNames` 逐项断言 C 解释器源码含对应处理（构建期一致性测试）。
 
-### P1.3 分支 backpatch 目标修复
+### P1.3 分支 backpatch 目标修复 ✅ 已实现
+
+> **落地情况**：编译器第一遍建立 `RefID→稳定标签` 表（匿名块按位置命名），br 的真实/假分支均回填**真实块标签**（条件跳转展开为 JNZ+JMP 双回填）；`LabelResolver.Resolve` 对未知标签报错而非静默落 offset 0（测试锚定）。
 
 - **现状**：`passes/vmp/compiler.go:181,193` 的 backpatch 目标写成合成名 `target_%d`/`true_%d`，与 `DefineLabel` 产生的基本块名不匹配，`LabelResolver.Resolve`（`passes/vmp/bytecode.go:123-125`）静默回退 **offset 0**——所有条件跳转实际跳到字节码开头。
 - **目标**：标签解析严格化，跳转目标正确。
 - **任务拆解**：编译器统一由 label 表分配名字；`Resolve` 未命中时返回错误而非静默 0；补 `Compiler.Compile` 单测（现在为零覆盖）覆盖含分支的函数。
 - **验收标准**：含 if/else 的测试函数编译后，模拟执行路径与原 IR 语义一致（Go 侧字节码解释器单测）。
 
-### P1.4 icmp 谓词完整映射
+### P1.4 icmp 谓词完整映射 ✅ 已实现
+
+> **落地情况**：llvmwrap 新增 `Instruction.ICmpPredicate()`（对接 `LLVMGetICmpPredicate`，native+mock），编译器按全部 10 个 LLVM 整数谓词映射 VM 指令（无符号 ULE/UGE 为本次 ISA 扩展）；表驱动测试覆盖。
 
 - **现状**：`compiler.go:157` 所有 icmp 一律编译为 `OP_CMP_EQ`（注释自认"简化处理"）——`<`、`>`、`!=` 语义全部错误。
 - **目标**：eq/ne/ult/ugt/slt/sgt 全量映射（配合 P1.2 的解释器 case）。
 - **任务拆解**：谓词→opcode 映射表；带符号比较视运行时解释器宽度约定（统一 i32）实现。
 - **验收标准**：单测覆盖 6 种谓词的编译输出 opcode 正确。
 
-### P1.5 调用目标符号记录
+### P1.5 调用目标符号记录 ✅ 已实现
+
+> **落地情况**：llvmwrap 新增 `Instruction.CalledValue()`（对接 `LLVMGetCalledValue`），call 编译取真实被调符号（回退 operand 0 名称），参数压栈跳过被调函数值；`ext_funcs` 元数据因此有真实内容。
 
 - **现状**：`compiler.go:211` call 指令的目标名写死 `"unknown"`，`ext_funcs` 元数据因此无意义。
 - **目标**：记录真实被调符号，运行时可校验/解析外部调用。
 - **任务拆解**：从 llvmwrap call 指令取 callee 名；元数据 `ext_funcs` 去重导出。
 - **验收标准**：含 `call @foo` 的模块编译后 meta 中 `ext_funcs` 含 `"foo"`。
 
-### P1.6 运行时解密与真实长度
+### P1.6 运行时解密与真实长度 ✅ 已实现
+
+> **落地情况**：VM 入口改为 `(bytecode, meta)` 双参数（Go 侧跳板同步传元数据全局）；运行时从元数据读取 `bytecode_len`/`encrypted`/`key_pad`，解密采用密钥拆分模型——`key = 注册静态片段 ^ key_pad`，静态片段经 `goprotect_set_static_key` 注入（默认 0x5A 与编译期一致），**不随 APK 元数据分发**；解密在独立堆缓冲进行，失败拒绝执行。
 
 - **现状**：`runtime/src/vm_entry.c:311-316` 注释明言"此处应解密字节码…简化实现：直接执行"，且 `bytecode_len = 1024; /* 实际应从元数据读取 */`。
 - **目标**：按元数据读取长度与密钥提示，解密后再解释执行。
 - **任务拆解**：长度/加密标志从 meta 读取（依赖 P1.1）；实现与 Go 侧 `deriveKey` 对齐的解密（AES-GCM 或按 `static_key` 的对称方案，两侧共用测试向量）；解密失败返回错误码而非崩溃。
 - **验收标准**：加密字节码经 C 例程解出与编译期一致的明文（共享向量单测）。
 
-### P1.7 补齐未定义钩子符号
+### P1.7 补齐未定义钩子符号 ✅ 已实现
+
+> **落地情况**：新增 `runtime/src/hooks.c` 提供 `__goprotect_hook` 与 `__goprotect_decrypt_strings` 的可链接实现（含 `goprotect_set_hook_callback` 事件回调；解密存根 no-op 待 P2.2 字面量改写后填充）；goprotect.h 同步全部声明；CMake 加入构建；四个 C 源文件 clang 语法检查通过。
 
 - **现状**：`passes/entry_exit.go:9`、`const_obf.go:11` 生成对 `__goprotect_hook`、`__goprotect_decrypt_strings` 的调用，但**全仓无声明无实现**——链接期直接 unresolved symbol。
 - **目标**：`runtime/include/goprotect.h` 声明 + `runtime/src/` 提供可链接实现（哪怕先是 no-op 打桩）。

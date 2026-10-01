@@ -71,11 +71,14 @@ func (m moduleImpl) functions() []Function {
 func (m moduleImpl) addGlobalString(name string, data []byte) Value {
 	cname := cstring(name)
 	defer C.free(unsafe.Pointer(cname))
-	// Create constant string
-	cstr := (*C.char)(C.CBytes(data))
+	// Append a NUL terminator so byte-code buffers and JSON metadata can be
+	// read as C strings by the runtime.
+	payload := make([]byte, len(data)+1)
+	copy(payload, data)
+	cstr := (*C.char)(C.CBytes(payload))
 	defer C.free(unsafe.Pointer(cstr))
-	constStr := C.LLVMConstString(cstr, C.uint(len(data)), C.LLVMBool(1))
-	ty := C.LLVMArrayType(C.LLVMInt8Type(), C.uint(len(data)))
+	constStr := C.LLVMConstString(cstr, C.uint(len(payload)), C.LLVMBool(1))
+	ty := C.LLVMArrayType(C.LLVMInt8Type(), C.uint(len(payload)))
 	gv := C.LLVMAddGlobal(m.ref, ty, cname)
 	C.LLVMSetInitializer(gv, constStr)
 	C.LLVMSetGlobalConstant(gv, 0)
@@ -161,6 +164,38 @@ func (i instructionImpl) operands() []Value {
 		}
 	}
 	return out
+}
+
+func (i instructionImpl) calledValue() Value {
+	return Value{impl: valueImpl{ref: C.LLVMGetCalledValue(i.ref)}}
+}
+
+// intPredicateNames maps LLVMIntPredicate values to their textual form.
+var intPredicateNames = map[C.LLVMIntPredicate]string{
+	C.LLVMIntEQ:  "eq",
+	C.LLVMIntNE:  "ne",
+	C.LLVMIntUGT: "ugt",
+	C.LLVMIntUGE: "uge",
+	C.LLVMIntULT: "ult",
+	C.LLVMIntULE: "ule",
+	C.LLVMIntSGT: "sgt",
+	C.LLVMIntSGE: "sge",
+	C.LLVMIntSLT: "slt",
+	C.LLVMIntSLE: "sle",
+}
+
+func (i instructionImpl) icmpPredicate() string {
+	if C.LLVMGetInstructionOpcode(i.ref) != C.LLVMICmp {
+		return ""
+	}
+	if name, ok := intPredicateNames[C.LLVMGetICmpPredicate(i.ref)]; ok {
+		return name
+	}
+	return ""
+}
+
+func (bb basicBlockImpl) asValue() Value {
+	return Value{impl: valueImpl{ref: C.LLVMBasicBlockAsValue(bb.ref)}}
 }
 
 func newBuilderAtImpl(instr Instruction) builderImpl {
@@ -289,6 +324,9 @@ func (v valueImpl) isConstInt() (bool, uint64) {
 	}
 	return true, uint64(C.LLVMConstIntGetZExtValue(v.ref))
 }
+
+func (v valueImpl) name() string   { return C.GoString(C.LLVMGetValueName(v.ref)) }
+func (v valueImpl) refID() uintptr { return uintptr(unsafe.Pointer(v.ref)) }
 
 func (v valueImpl) typ() ValueType {
 	return ValueType{impl: valueTypeImpl{ref: C.LLVMTypeOf(v.ref)}}

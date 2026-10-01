@@ -27,12 +27,12 @@ go build -tags llvm ./cmd/goprotect
 - **安全钩子**：在关键函数入口调用 `__goprotect_check_integrity` 与 `__goprotect_anti_debug`。
 
 ### 进阶 VMP 支持（本次新增）
-- **多 VM/分级保护**：可配置 VM_A / VM_B 不同 ISA，按 normal/sensitive/critical 分类选择 VM。
-- **按构建随机化**：每次构建为每个 VM 生成随机 opcode 映射并写入元数据，便于运行时同步。
-- **字节码加密**：生成的字节码以 XOR key 加密，运行时通过 `__goprotect_vm_entry_encrypted_<vm>` 解密执行；key 由静态片段与随机片段组合，运行时可再加入环境片段。
-- **元数据输出**：为每个虚拟化函数生成 meta 全局常量（包含 VM 名、build nonce、key 提示），供运行时防调试/完整性校验使用。
+- **多 VM/分级保护**：可配置 VM_A / VM_B 不同 ISA，按 normal/sensitive/critical 分类选择 VM；`enable_multi_vm: false` 可折叠为单 VM。
+- **按构建随机化**：每次构建为每个 VM 生成随机 opcode 映射并写入元数据（`opcodes`：标准助记符 → 随机化字节），运行时据此构建解码表。
+- **字节码加密**：生成的字节码以 XOR key 加密，运行时通过 `__goprotect_vm_entry_encrypted_<vm>(bytecode, meta)` 解密执行；密钥拆分为 `注册静态片段 ^ key_pad`（静态片段经 `goprotect_set_static_key` 注入，默认 0x5A），不随 APK 元数据分发。
+- **元数据输出**：为每个虚拟化函数生成 meta 全局常量（包含 VM 名、build nonce、`bytecode_len`、`encrypted`、`key_pad`、`param_count`、opcode 解码表与 `ext_funcs`）；解释器先经解码表还原标准 opcode 再执行，Go/C 两侧定义由构建期测试校验一致。
 
-运行时实现（解密/VM/完整性校验）需在 Android 端单独提供，本仓库仅负责 IR 端的插桩与替换。
+运行时解密/VM 解释器已随 `runtime/` 提供（见 `runtime/src/vm_entry.c` 与 `hooks.c`）；真机端到端联调仍需配合 NDK 集成（ROADMAP P3/P4）。
 
 ## 配置要点
 

@@ -199,9 +199,12 @@ The interactive wizard (`protector ui`) turns the same pipeline into a five-step
 ### `protector` — APK hardening CLI
 
 ```
-protector -input <app.apk> [options]
-protector ui                                  # interactive wizard
-protector -profile full -input <app.apk> ...  # headless preset
+protector run  [options]      full pipeline (config + profile + flags)
+protector scan [options]      security scan only
+protector sign [options]      align + sign (+ -verify)
+protector ui                  interactive wizard
+protector config init         write an annotated config template
+protector [options]           legacy flat mode (deprecated, still works)
 ```
 
 #### Interactive wizard — `protector ui`
@@ -236,7 +239,9 @@ protector -profile full -input app.apk \
 | `-output` | `dist/<name>-protected.apk` | Final artifact path |
 | `-report` | — | Where to write the JSON run report |
 | `-workdir` | OS temp | Root for per-run temp directories |
+| `-keep-workdir` | off | Keep the intermediate run directory for debugging |
 | `-skip-scan` | off | Disable the pre-flight security scan |
+| `-verify` | off | Run `apksigner verify --print-certs` after signing |
 
 #### Protection options
 
@@ -257,6 +262,7 @@ protector -profile full -input app.apk \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-zipalign` | `zipalign` on PATH | zipalign binary; setting it enables alignment |
+| `-align-bytes` | 4 | zipalign alignment in bytes |
 | `-apksigner` | `apksigner` on PATH | apksigner binary; setting it enables signing |
 | `-keystore` | — | Keystore for V1+V2 signing |
 | `-store-pass` | — | Keystore password |
@@ -277,6 +283,7 @@ protector -profile full -input app.apk \
 | `-reinforce-output` | — | Expected output APK of the hardener |
 | `-reinforce-arg` | — | Argument passed to the hardener (repeatable; supports `{{input_apk}}`, `{{output_apk}}`, `{{work_dir}}`, `{{ts}}` templates) |
 | `-reinforce-env` | — | `KEY=VALUE` env for the hardener (repeatable) |
+| `-reinforce-timeout` | — | Timeout for the hardener, e.g. `5m` |
 
 ### `goprotect` — IR obfuscation CLI
 
