@@ -40,10 +40,11 @@
 
 ## Project Structure & Module Organization
 - `cmd/protector`: APK 加固 CLI；flag 解析与 config 覆盖
-- `cmd/goprotect`: LLVM 混淆 CLI；读取 IR，执行 Pass 序列
-- `internal/app`: 核心 pipeline（config 解析、扫描、保护、签名、报告）
-- `passes/`: LLVM/IR 混淆 Pass 实现
+- `cmd/goprotect`: LLVM 混淆 CLI；读取 IR（.bc/.ll），执行 Pass 序列
+- `internal/app`: 核心 pipeline（config 解析、扫描、保护、签名、报告；`runner.go` 提供 CommandRunner 抽象供编排测试注入）
+- `passes/`: LLVM/IR 混淆 Pass 实现（`passes/vmp/` 字节码编译器；`passes/testdata/` llvm-tagged 集成测试夹具）
 - `llvmwrap/`: LLVM C API Go 封装（native + mock 双实现）
+- `runtime/`: C 运行时（VM 解释器/字符串解密/完整性/反调试，tests/ 下 host 单测）；`runtime/android/` 为 NDK demo 加载器（密钥外置方案，见 docs/design/adr-0001-dex-key-delivery.md）
 - `config/`: 配置结构定义与加载
 - `config.json.example`: 复制为 `config.json` 使用；secrets 不要提交
 - `sign/`: 本地 keystore 材料；视为敏感目录

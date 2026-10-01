@@ -161,7 +161,7 @@ The interactive wizard (`protector ui`) turns the same pipeline into a five-step
 | Interactive wizard | `protector ui`: 5-step Bubbletea TUI — auto-detected build-tools, profile presets, env-referenced secrets, config preview |
 | Headless presets | `-profile quick\|full\|sign-only` collapses the flag surface to input + signing material |
 | Static security scan | Detects hardener fingerprints, embedded APKs/certificates, private-key leaks, anti-environment keywords (frida, xposed, magisk, …), Janus signature risk |
-| DEX encryption | All `classes*.dex` encrypted with AES-256-GCM; optional Deflate pre-compression |
+| DEX encryption | All `classes*.dex` encrypted with AES-256-GCM; optional Deflate pre-compression. Since v1.6 the key stays **outside** the APK (`<output>.key`, 0600) — see [ADR-0001](docs/design/adr-0001-dex-key-delivery.md) |
 | Package randomization | Rewrites the manifest package name (same-length) to blur static analysis |
 | Pseudo-hardening markers | Embeds artifacts that mimic mainstream commercial hardeners |
 | Third-party hardener hook | Wraps any external reinforcement CLI into the pipeline with templated paths/env |
@@ -174,23 +174,27 @@ The interactive wizard (`protector ui`) turns the same pipeline into a five-step
 | Feature | What it does |
 |---------|--------------|
 | Control-flow flattening | Rewrites functions around a switch-dispatcher state machine |
-| Constant splitting / instruction substitution | Splits constants across arithmetic ops, wraps identities with XOR |
-| Constant obfuscation | Decrypt-stub calls around sensitive literals |
+| Constant splitting / instruction substitution | Splits constants across arithmetic ops, wraps identities with XOR / add-split chains |
+| Literal obfuscation | Rewrites integer constants as runtime-recoverable identity chains; encrypts private string globals into writable ciphertext restored in place at startup — plaintext leaves the module |
 | Security hooks | Injects anti-debug & integrity-check entry/exit calls |
+| `.bc` / `.ll` input | Textual IR accepted directly (dispatched by extension) |
+| CFG dumps | `-dump-cfg` renders before/after DOT graphs (graphviz) |
 | Obfuscation levels | `low` / `medium` / `high` presets tuning ratios and intensity |
 
 ### 🌀 VMP virtualization — 🧪
 
 | Feature | What it does |
 |---------|--------------|
-| Bytecode compiler | Compiles selected functions from LLVM IR into a custom VM ISA |
+| Bytecode compiler | Compiles selected functions from LLVM IR into a custom VM ISA — void **and** i32 returns, up to 4 i32 arguments |
+| Full body replacement | Original instructions are erased from the output; only the entry stub remains |
 | Multi-VM tiering | Split VMs (e.g. `vm_a`/`vm_b`) mapped to `normal`/`sensitive`/`critical` function tiers |
-| Opcode randomization | Per-build randomized opcode map |
-| Bytecode encryption | Encrypted program bytes with per-VM keys |
+| Opcode randomization | Per-build randomized opcode map baked into the bytecode data |
+| Bytecode encryption | XOR-encrypted program bytes, key split as `static-fragment ^ key_pad` |
+| Unified entry ABI | One symbol `__goprotect_vm_entry_encrypted(bc, meta, a0..a3) -> i32` — custom VM names can't break linking |
 
 ### ⚙️ Android C runtime — 🧪
 
-`runtime/` provides the NDK-buildable skeleton: VM entry points, anti-debug and integrity hooks — cross-compiled via CMake toolchain. See [Runtime integration](#runtime-integration).
+`runtime/` provides the NDK-buildable pieces: the VM interpreter (metadata-driven decode + decrypt + execute, with real argument passing and return values), in-place string decryption, FNV-1a integrity verification with configurable failure policy (LOG/EXIT/ZEROIZE), and anti-debug incl. Frida port probing. A demo NDK DEX loader (`runtime/android/`) pairs with the externalized key: minimal AES-256-GCM + JNI glue + `InMemoryDexClassLoader` sample. See [Runtime integration](#runtime-integration).
 
 ---
 
@@ -295,11 +299,11 @@ goprotect -input module.bc -config config/example.yml -o module_protected.bc
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-input` | — | Input LLVM bitcode (`.bc`; `.ll` planned) |
+| `-input` | — | Input LLVM module: `.bc` bitcode or `.ll` textual IR |
 | `-config` | — | JSON/YAML config — see `config/example.yml` |
 | `-o` | `obf-<name>.bc` | Output bitcode path |
 | `-level` | from config | Override obfuscation level: `low` / `medium` / `high` |
-| `-dump-cfg` | off | DOT control-flow dumps before/after passes (stub — see roadmap) |
+| `-dump-cfg` | off | DOT control-flow dumps before/after passes (render with graphviz) |
 
 Deep dive: [docs/goprotect.md](docs/goprotect.md) (Chinese).
 
@@ -317,9 +321,11 @@ Precedence: CLI flags switch options **on** over config values; the config file 
 VMP-protected functions need the runtime interpreter. The repo ships the C skeleton:
 
 ```c
-void __goprotect_check_integrity(uint32_t region_id); // integrity hook
-void __goprotect_anti_debug(void);                    // anti-debug hook
-void __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode); // VM entry
+void __goprotect_check_integrity(uint32_t region_id); // FNV-1a region verify (register via goprotect_register_region)
+void __goprotect_anti_debug(void);                    // TracerPid/maps/emulator + Frida port probe
+int32_t __goprotect_vm_entry_encrypted(const uint8_t* bc, const char* meta,
+                                       int32_t a0, int32_t a1, int32_t a2, int32_t a3); // VM entry
+void __goprotect_decrypt_strings(void);               // in-place restore of encrypted string globals
 ```
 
 ```bash
@@ -331,7 +337,7 @@ cmake -DANDROID_ABI=arm64-v8a \
 make
 ```
 
-> Status: honest answer — the runtime currently executes bytecode without decryption and integrity checks are placeholders. Full wiring is tracked as [roadmap P1/P3](docs/ROADMAP.md).
+> Status: the runtime is real — bytecode is decoded per randomized metadata, decrypted and executed with argument passing and return values; integrity hashing and Frida port detection are implemented and host-tested. What still needs real-device work: on-device acceptance of the anti-debug/integrity signals and wiring the DEX loader demo into a real app ([`runtime/android/README.md`](runtime/android/README.md)).
 
 ---
 
@@ -352,11 +358,11 @@ The full plan — with per-item status, code evidence and acceptance criteria �
 
 | Phase | Theme | Highlight items |
 |-------|-------|-----------------|
-| **P0** | Hardening UX & config safety | ✅ `protector ui` TUI wizard, `-profile` presets, `${VAR}` env expansion and env-based secret flags are **done**; CLI sub-command restructure and override-semantics fixes remain |
-| **P1** | VMP end-to-end | Export opcode map to metadata, implement bytecode decryption, fix branch/call compilation |
-| **P2** | Pass correctness | Real terminator rewriting in cf-flatten, literal encryption in const-obf, `.ll` input, DOT dumps |
-| **P3** | Android runtime | Real integrity hashing, Frida port detection, DEX loader/decryptor |
-| **P4** | Test infrastructure | `CommandRunner` mocking, LLVM-tagged integration tests |
+| **P0** | Hardening UX & config safety | ✅ `protector ui` TUI wizard, `-profile` presets, CLI sub-commands, `${VAR}` env expansion, env-secret flags, override-semantics fixes |
+| **P1** | VMP end-to-end | ✅ Opcode map exported to metadata, real runtime decryption, branch/icmp/value-model compilation, verified on real LLVM via `lli` |
+| **P2** | Pass correctness | ✅ Real cf-flatten rewriting, integer-literal + string encryption, non-void virtualization with body erasure, `.ll` input, DOT dumps |
+| **P3** | Android runtime | ✅ Real integrity hashing + failure policy, Frida port detection, DEX key externalization + NDK loader demo (host-verified) |
+| **P4** | Test infrastructure | ✅ `CommandRunner` orchestration tests, LLVM-tagged integration tests with semantic `lli` runs in CI |
 
 ---
 
@@ -369,7 +375,7 @@ No. LLVM is only required to build/run `goprotect` (`go build -tags llvm`). The 
 Run `protector ui` for the interactive wizard, or use `-profile quick|full|sign-only` headlessly. Secrets go through `-store-pass-env`-style flags or `${VAR}` config references, so command lines stay clean and history-free.
 
 **How do encrypted DEX files actually run?**
-They don't — not yet, out of the box. The pipeline encrypts DEX into `assets/protector/` and writes metadata, but the Android-side loader/decryptor is part of the experimental runtime work (roadmap P3). Today, treat DEX encryption as a building block, and rely on scan + package randomization + signing for release hygiene.
+They don't — not out of the box. The pipeline encrypts DEX into `assets/protector/` and, since v1.6, the key is **not** shipped inside the APK anymore (it lands next to the artifact as `<output>.key`, mode 0600). A demo NDK loader showing the recovery path — key split into constants, AES-256-GCM decrypt, `InMemoryDexClassLoader` — lives in [`runtime/android/`](runtime/android/README.md) with on-device acceptance steps. Wiring that (or your own key channel) into your app is the remaining integration work; meanwhile scan + package randomization + signing still provide release hygiene.
 
 **Which signature schemes are supported?**
 V1 + V2 via `apksigner` (V1/V2 are force-enabled). V3/V4 support is not implemented.
@@ -411,6 +417,8 @@ Bug reports and PRs are welcome at [github.com/Ero-Cat/Apk-Protector-Tool](https
 
 | Version | Changes |
 |---------|---------|
+| **v1.6** | Pass correctness round: literal + string encryption, non-void virtualization with body erasure, `.ll` input, DOT dumps; real integrity hashing & Frida port probing; DEX key externalization + NDK loader demo; LLVM-tagged & orchestration test harnesses |
+| **v1.5** | `protector ui` TUI wizard, CLI sub-commands + presets, P0/P1 completion: VMP verified end-to-end on real LLVM (`lli` + C runtime) |
 | **v1.4** | VMP bytecode compiler, control-flow flattening rewrite, runtime library skeleton, unit tests |
 | **v1.3** | Fix Android R+ install failures, `resources.arsc` stored uncompressed |
 | **v1.2** | Multi-VM randomized VMP, bytecode encryption, tiered protection |

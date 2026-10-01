@@ -161,7 +161,7 @@ protector -profile full -input app-release.apk \
 | 交互向导 | `protector ui`：五步 Bubbletea TUI —— build-tools 自动探测、预设选择、密钥走 env 引用、配置预览 |
 | Headless 预设 | `-profile quick\|full\|sign-only` 把参数面压缩到输入 + 签名材料 |
 | 静态安全扫描 | 检出加固器指纹、内嵌 APK/证书、私钥泄露、反环境关键词（frida、xposed、magisk…）、Janus 签名风险 |
-| DEX 加密 | 全部 `classes*.dex` 使用 AES-256-GCM 加密；可选 Deflate 预压缩 |
+| DEX 加密 | 全部 `classes*.dex` 使用 AES-256-GCM 加密；可选 Deflate 预压缩。v1.6 起密钥**不随 APK 分发**（`<output>.key`，0600）—— 见 [ADR-0001](docs/design/adr-0001-dex-key-delivery.md) |
 | 包名随机化 | 等长改写清单包名，干扰静态分析 |
 | 伪加固标记 | 内嵌模拟主流商业加固器的特征产物 |
 | 第三方加固器钩子 | 以模板化路径/环境变量把外部加固 CLI 包装进流水线 |
@@ -175,22 +175,26 @@ protector -profile full -input app-release.apk \
 |------|------|
 | 控制流平坦化 | 以 switch 调度器状态机重写函数 |
 | 常量拆分 / 指令替换 | 常量经算术拆分、XOR 等价变换包装 |
-| 常量混淆 | 在敏感字面量周围插入解密存根调用 |
+| 字面量混淆 | 整数常量改写为运行时可恢复的恒等链；私有字符串全局加密为可写密文、启动时原位还原 —— 明文不再留在产物里 |
 | 安全钩子 | 注入反调试与完整性校验的入口/出口调用 |
+| `.bc` / `.ll` 输入 | 文本 IR 直接按扩展名识别 |
+| CFG 导出 | `-dump-cfg` 前后 DOT 图（graphviz 渲染） |
 | 混淆等级 | `low` / `medium` / `high` 预设，调节比率与强度 |
 
 ### 🌀 VMP 虚拟化 — 🧪
 
 | 功能 | 说明 |
 |------|------|
-| 字节码编译器 | 将选定函数从 LLVM IR 编译为自定义 VM 指令集 |
+| 字节码编译器 | 将选定函数从 LLVM IR 编译为自定义 VM 指令集 —— 支持 void 与 i32 返回、最多 4 个 i32 参数 |
+| 旧体整体擦除 | 原指令从产物中抹除，只保留入口调用桩 |
 | 多 VM 分级 | 拆分 VM（如 `vm_a`/`vm_b`）映射 normal/sensitive/critical 三级函数 |
-| Opcode 随机化 | 每次构建生成唯一指令映射 |
-| 字节码加密 | 按 VM 密钥加密程序字节 |
+| Opcode 随机化 | 每次构建生成唯一指令映射，烘焙进字节码数据 |
+| 字节码加密 | XOR 加密，密钥拆分为 `静态片段 ^ key_pad` |
+| 统一入口 ABI | 单符号 `__goprotect_vm_entry_encrypted(bc, meta, a0..a3) -> i32`，自定义 VM 名不会破坏链接 |
 
 ### ⚙️ Android C 运行时 — 🧪
 
-`runtime/` 提供可 NDK 交叉编译的骨架：VM 入口、反调试与完整性钩子，经 CMake 工具链构建。见[运行时集成](#运行时集成)。
+`runtime/` 提供可 NDK 交叉编译的完整组件：VM 解释器（按元数据解码/解密/传参执行）、字符串原位解密、FNV-1a 完整性校验（可配失败策略 LOG/EXIT/ZEROIZE）、反调试（含 Frida 端口探测）。`runtime/android/` 为配套的 NDK demo 加载器：最小 AES-256-GCM + JNI 胶水 + `InMemoryDexClassLoader` 示例，与外置密钥方案（ADR-0001）配对。见[运行时集成](#运行时集成)。
 
 ---
 
@@ -295,11 +299,11 @@ goprotect -input module.bc -config config/example.yml -o module_protected.bc
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `-input` | — | 输入 LLVM 位码（`.bc`；`.ll` 规划中） |
+| `-input` | — | 输入 LLVM 模块：`.bc` 位码或 `.ll` 文本 IR |
 | `-config` | — | JSON/YAML 配置 —— 见 `config/example.yml` |
 | `-o` | `obf-<名称>.bc` | 输出位码路径 |
 | `-level` | 取配置值 | 覆盖混淆等级：`low` / `medium` / `high` |
-| `-dump-cfg` | 关 | Pass 前后导出 DOT 控制流（存根 —— 见路线图） |
+| `-dump-cfg` | 关 | Pass 前后导出 DOT 控制流（graphviz 渲染） |
 
 深入文档：[docs/goprotect.md](docs/goprotect.md)。
 
@@ -317,9 +321,11 @@ goprotect -input module.bc -config config/example.yml -o module_protected.bc
 VMP 保护的函数需要运行时解释器支持，仓库提供 C 骨架：
 
 ```c
-void __goprotect_check_integrity(uint32_t region_id); // 完整性钩子
-void __goprotect_anti_debug(void);                    // 反调试钩子
-void __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode); // VM 入口
+void __goprotect_check_integrity(uint32_t region_id); // 区域 FNV-1a 校验（goprotect_register_region 注册）
+void __goprotect_anti_debug(void);                    // TracerPid/maps/模拟器 + Frida 端口探测
+int32_t __goprotect_vm_entry_encrypted(const uint8_t* bc, const char* meta,
+                                       int32_t a0, int32_t a1, int32_t a2, int32_t a3); // VM 入口
+void __goprotect_decrypt_strings(void);               // 加密字符串全局原位还原
 ```
 
 ```bash
@@ -331,7 +337,7 @@ cmake -DANDROID_ABI=arm64-v8a \
 make
 ```
 
-> 现状（诚实说明）：运行时目前直接执行字节码、未解密，完整性校验为占位实现。完整打通跟踪于[路线图 P1/P3](docs/ROADMAP.md)。
+> 现状（诚实说明）：运行时是真实实现 —— 字节码按随机化元数据解码、解密后带参执行并回传返回值；完整性哈希与 Frida 端口探测已实现且 host 测试覆盖。仍需真机收尾的是：反调试/完整性信号的真机验收，以及把 DEX 加载 demo 接进真实 App（[`runtime/android/README.md`](runtime/android/README.md)）。
 
 ---
 
@@ -352,11 +358,11 @@ make
 
 | 阶段 | 主题 | 代表事项 |
 |------|------|----------|
-| **P0** | 加固 UX 与配置安全 | ✅ `protector ui` TUI 向导、`-profile` 预设、`${VAR}` 环境变量展开与 env 密钥参数**已完成**；CLI 子命令化与覆盖语义修复仍在进行 |
-| **P1** | VMP 端到端 | 导出 opcode 映射到元数据、实现字节码解密、修复分支/调用编译 |
-| **P2** | Pass 正确性 | cf-flatten 真实终结器重写、const-obf 字面量加密、`.ll` 输入、DOT 导出 |
-| **P3** | Android 运行时 | 真实完整性哈希、Frida 端口检测、DEX 加载/解密器 |
-| **P4** | 测试基建 | `CommandRunner` mock、LLVM tag 集成测试 |
+| **P0** | 加固 UX 与配置安全 | ✅ TUI 向导、预设、CLI 子命令化、`${VAR}` 展开、env 密钥参数、覆盖语义修复 |
+| **P1** | VMP 端到端 | ✅ opcode 映射入元数据、运行时真实解密、分支/icmp/值模型编译，真实 LLVM `lli` 验证 |
+| **P2** | Pass 正确性 | ✅ cf-flatten 真实重写、整数与字符串字面量加密、非 void 虚拟化 + 旧体擦除、`.ll` 输入、DOT 导出 |
+| **P3** | Android 运行时 | ✅ 真实完整性哈希 + 失败策略、Frida 端口探测、DEX 密钥外置 + NDK 加载器 demo（host 验证） |
+| **P4** | 测试基建 | ✅ `CommandRunner` 编排测试、LLVM tag 集成测试（CI 含 lli 语义验证） |
 
 ---
 
@@ -369,7 +375,7 @@ make
 运行 `protector ui` 走交互向导，或用 `-profile quick|full|sign-only` 走 headless。密钥经 `-store-pass-env` 类参数或配置里的 `${VAR}` 引用接入，命令行干净且不落 history。
 
 **加密后的 DEX 怎么运行？**
-目前开箱即用还跑不起来。流水线把 DEX 加密进 `assets/protector/` 并写入元数据，但 Android 侧加载/解密器属于实验性运行时工作（路线图 P3）。当前请把 DEX 加密视为积木组件，发布卫生依赖扫描 + 包名随机化 + 签名。
+目前开箱即用还跑不起来。流水线把 DEX 加密进 `assets/protector/`，且自 v1.6 起密钥**不再随 APK 分发**（落在产物旁的 `<output>.key`，权限 0600）。恢复路径的 NDK demo 加载器（密钥拆分常量 + AES-256-GCM 解密 + `InMemoryDexClassLoader`）见 [`runtime/android/`](runtime/android/README.md)，含真机验收步骤。把它（或你自己的密钥通道）接进 App 是剩余的集成工作；期间发布卫生仍靠扫描 + 包名随机化 + 签名。
 
 **支持哪些签名方案？**
 经 `apksigner` 的 V1 + V2（强制开启 V1/V2）。V3/V4 未实现。
@@ -411,6 +417,8 @@ go test ./...         # 运行测试
 
 | 版本 | 更新内容 |
 |------|----------|
+| **v1.6** | Pass 正确性轮：整数/字符串字面量加密、非 void 虚拟化 + 旧体擦除、`.ll` 输入、DOT 导出；真实完整性哈希与 Frida 端口探测；DEX 密钥外置 + NDK 加载器 demo；llvm-tag 与编排测试地基 |
+| **v1.5** | `protector ui` TUI 向导、CLI 子命令化 + 预设；P0/P1 完成：VMP 在真实 LLVM 上端到端验证（`lli` + C 运行时） |
 | **v1.4** | VMP 字节码编译器、控制流平坦化重写、运行时库骨架、单元测试 |
 | **v1.3** | 修复 Android R+ 安装问题，`resources.arsc` 不压缩 |
 | **v1.2** | 多 VM 随机化 VMP、字节码加密、分级保护 |
