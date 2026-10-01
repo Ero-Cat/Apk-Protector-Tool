@@ -138,14 +138,6 @@ func (bb basicBlockImpl) instructions() []Instruction {
 	return out
 }
 
-func (bb basicBlockImpl) appendInstructionBefore(before Instruction, inst Instruction) {
-	// Unsupported in this minimal wrapper; operations should create instructions with builders directly.
-}
-
-func (bb basicBlockImpl) terminateWith(inst Instruction) {
-	// noop placeholder; terminators should be built with a builder positioned at the end.
-}
-
 func (bb basicBlockImpl) moveBefore(target BasicBlock) {
 	C.LLVMMoveBasicBlockBefore(bb.ref, target.impl.ref)
 }

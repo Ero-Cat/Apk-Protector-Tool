@@ -45,13 +45,9 @@ func (bb *BasicBlock) Instructions() []Instruction { return bb.impl.instructions
 
 // Terminator returns the basic block's terminating instruction (every
 // well-formed block has one).
-func (bb BasicBlock) Terminator() Instruction { return bb.impl.terminator() }
-func (bb *BasicBlock) AppendInstructionBefore(before Instruction, inst Instruction) {
-	bb.impl.appendInstructionBefore(before, inst)
-}
-func (bb *BasicBlock) TerminateWith(inst Instruction) { bb.impl.terminateWith(inst) }
-func (bb *BasicBlock) MoveBefore(target BasicBlock)   { bb.impl.moveBefore(target) }
-func (bb *BasicBlock) Name() string                   { return bb.impl.name() }
+func (bb BasicBlock) Terminator() Instruction       { return bb.impl.terminator() }
+func (bb *BasicBlock) MoveBefore(target BasicBlock) { bb.impl.moveBefore(target) }
+func (bb *BasicBlock) Name() string                 { return bb.impl.name() }
 
 // AsValue exposes the basic block as a value so builders and branch-target
 // resolution can treat it uniformly.

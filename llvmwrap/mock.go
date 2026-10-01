@@ -27,8 +27,6 @@ func (f functionImpl) typ() ValueType                                        { r
 func (f functionImpl) returnType() ValueType                                 { return ValueType{} }
 func (f functionImpl) asValue() valueImpl                                    { return valueImpl{} }
 func (bb basicBlockImpl) instructions() []Instruction                        { return nil }
-func (bb basicBlockImpl) appendInstructionBefore(Instruction, Instruction)   {}
-func (bb basicBlockImpl) terminateWith(Instruction)                          {}
 func (bb basicBlockImpl) moveBefore(BasicBlock)                              {}
 func (bb basicBlockImpl) name() string                                       { return "" }
 func (i instructionImpl) opcode() string                                     { return "" }

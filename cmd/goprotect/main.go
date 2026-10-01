@@ -16,8 +16,8 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "", "Path to YAML/JSON config")
-	input := flag.String("input", "", "Input LLVM bitcode/IR (.bc/.ll)")
-	output := flag.String("o", "", "Output LLVM bitcode/IR")
+	input := flag.String("input", "", "Input LLVM bitcode (.bc); textual IR (.ll) is not supported yet — compile it with 'clang -emit-llvm -c'")
+	output := flag.String("o", "", "Output LLVM bitcode (.bc)")
 	level := flag.String("level", "", "Override obfuscation level (low|medium|high)")
 	dumpCFG := flag.Bool("dump-cfg", false, "Dump DOT graphs before/after passes")
 	flag.Parse()

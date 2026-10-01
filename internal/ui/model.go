@@ -75,8 +75,15 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	if fm, ok := final.(model); ok && fm.quitMsg != "" {
-		fmt.Println(fm.quitMsg)
+	if fm, ok := final.(model); ok {
+		if fm.quitMsg != "" {
+			fmt.Println(fm.quitMsg)
+		}
+		// 管线失败的运行以非零退出码结束，脚本可凭此感知。
+		if fm.runErr != nil {
+			fmt.Fprintf(os.Stderr, "pipeline failed: %v\n", fm.runErr)
+			return fm.runErr
+		}
 	}
 	return nil
 }
