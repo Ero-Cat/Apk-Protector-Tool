@@ -23,7 +23,6 @@ func TestMetadataJSONExportsDecoderEssentials(t *testing.T) {
 	result := &vmp.CompileResult{
 		Bytecode:   make([]byte, 33),
 		Mapper:     mapper,
-		ExtFuncs:   map[string]uint16{"some_callee": 3},
 		LocalCount: 4,
 		ParamCount: 2,
 	}
@@ -66,9 +65,9 @@ func TestMetadataJSONExportsDecoderEssentials(t *testing.T) {
 		t.Errorf("opcodes[ADD] = %v, want %v", opcodes["ADD"], want)
 	}
 
-	ext, ok := meta["ext_funcs"].(map[string]any)
-	if !ok || ext["some_callee"] != float64(3) {
-		t.Fatalf("ext_funcs wrong: %v", meta["ext_funcs"])
+	// ext_funcs 已随 call 编译脚手架移除（P1.5 后续修正）：字段必须缺席。
+	if _, present := meta["ext_funcs"]; present {
+		t.Fatalf("ext_funcs must be absent, got %v", meta["ext_funcs"])
 	}
 }
 

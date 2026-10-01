@@ -108,9 +108,6 @@ func (m *Module) Verify() error { return m.impl.verify() }
 // String renders the module as textual IR (diagnostics and debugging).
 func (m *Module) String() string { return m.impl.string() }
 
-// CalledValue returns the callee of a call instruction.
-func (i Instruction) CalledValue() Value { return i.impl.calledValue() }
-
 // ICmpPredicate returns the predicate of an icmp instruction
 // ("eq", "ne", "ugt", "uge", "ult", "ule", "sgt", "sge", "slt", "sle"),
 // or "" when the instruction is not an integer comparison.

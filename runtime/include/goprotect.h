@@ -161,7 +161,9 @@ void goprotect_set_static_key(uint8_t key);
  *   "key_pad": <随机密钥片段>,
  *   "key_hint": "<运行时密钥提示>",
  *   "opcodes": { "ADD": <随机化字节>, ... },
- *   "ext_funcs": { "<符号名>": <函数ID>, ... }
+ *   "ext_funcs": { ... }   // reserved：C 侧 OP_CALL_EXT 与注册表已实现且
+ *                           // 有单测；编译器暂不产出 call 虚拟化，此字段
+ *                           // 当前不会出现
  * }
  */
 

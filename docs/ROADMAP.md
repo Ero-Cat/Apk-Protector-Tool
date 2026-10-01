@@ -129,14 +129,14 @@
 - **任务拆解**：谓词→opcode 映射表；带符号比较视运行时解释器宽度约定（统一 i32）实现。
 - **验收标准**：单测覆盖 6 种谓词的编译输出 opcode 正确。
 
-### P1.5 调用目标符号记录 ✅ 已实现
+### P1.5 调用目标符号记录 ✅ 已实现（后经 P1.8 重写收敛）
 
-> **落地情况**：llvmwrap 新增 `Instruction.CalledValue()`（对接 `LLVMGetCalledValue`），call 编译取真实被调符号（回退 operand 0 名称），参数压栈跳过被调函数值；`ext_funcs` 元数据因此有真实内容。
+> **落地情况**：llvmwrap 曾新增 `Instruction.CalledValue()`（对接 `LLVMGetCalledValue`），call 编译取真实被调符号，`ext_funcs` 元数据一度有真实内容。
+>
+> ⚠️ **后续修正（2026-10，P2.3 轮）**：P1.8 值模型重写后 call 指令整体保守跳过（含 call 的函数不虚拟化），`ext_funcs` 恒空、从未出现在产物元数据；上述脚手架（编译器 extFuncs 表、`CompileResult.ExtFuncs`、`CalledValue()` API）已作为死代码移除。C 侧 `OP_CALL_EXT` 与 `goprotect_register_ext_func` 注册表能力保留且有单测（`runtime/tests/test_vm.c`），实现 call 虚拟化时随真实编译逻辑一并恢复（见"后续方向"）。
 
-- **现状**：`compiler.go:211` call 指令的目标名写死 `"unknown"`，`ext_funcs` 元数据因此无意义。
 - **目标**：记录真实被调符号，运行时可校验/解析外部调用。
-- **任务拆解**：从 llvmwrap call 指令取 callee 名；元数据 `ext_funcs` 去重导出。
-- **验收标准**：含 `call @foo` 的模块编译后 meta 中 `ext_funcs` 含 `"foo"`。
+- **验收标准**（当时达成）：含 `call @foo` 的模块编译后 meta 中 `ext_funcs` 含 `"foo"`。
 
 ### P1.6 运行时解密与真实长度 ✅ 已实现
 

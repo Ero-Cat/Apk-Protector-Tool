@@ -190,17 +190,16 @@ func (p *VirtualizePass) pickVMFor(fn string) string {
 // bytecodeMetadata 字节码元数据结构。运行时依赖其中的 bytecode_len、
 // key_pad 与 opcodes 解码表才能执行（见 runtime/src/vm_entry.c）。
 type bytecodeMetadata struct {
-	Function    string            `json:"fn"`
-	VM          string            `json:"vm"`
-	BuildNonce  uint64            `json:"build_nonce"`
-	BytecodeLen int               `json:"bytecode_len"`
-	LocalCount  int               `json:"local_count"`
-	ParamCount  int               `json:"param_count"`
-	Encrypted   bool              `json:"encrypted"`
-	KeyPad      uint8             `json:"key_pad"`
-	KeyHint     string            `json:"key_hint,omitempty"`
-	Opcodes     map[string]uint8  `json:"opcodes"`
-	ExtFuncs    map[string]uint16 `json:"ext_funcs,omitempty"`
+	Function    string           `json:"fn"`
+	VM          string           `json:"vm"`
+	BuildNonce  uint64           `json:"build_nonce"`
+	BytecodeLen int              `json:"bytecode_len"`
+	LocalCount  int              `json:"local_count"`
+	ParamCount  int              `json:"param_count"`
+	Encrypted   bool             `json:"encrypted"`
+	KeyPad      uint8            `json:"key_pad"`
+	KeyHint     string           `json:"key_hint,omitempty"`
+	Opcodes     map[string]uint8 `json:"opcodes"`
 }
 
 // metadataJSON：生成结构化元数据 JSON。Opcodes 为"标准助记符 -> 本次构建
@@ -221,7 +220,6 @@ func (p *VirtualizePass) metadataJSON(fn, vm string, keyPad byte, result *vmp.Co
 		KeyPad:      keyPad,
 		KeyHint:     p.Cfg.VMP.RuntimeKeyHint,
 		Opcodes:     opcodes,
-		ExtFuncs:    result.ExtFuncs,
 	}
 	data, _ := json.Marshal(meta)
 	return string(data)

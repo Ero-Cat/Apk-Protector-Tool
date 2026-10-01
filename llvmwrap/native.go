@@ -390,10 +390,6 @@ func (i instructionImpl) operands() []Value {
 	return out
 }
 
-func (i instructionImpl) calledValue() Value {
-	return Value{impl: valueImpl{ref: C.LLVMGetCalledValue(i.ref)}}
-}
-
 func (i instructionImpl) setOperand(idx int, v Value) {
 	C.LLVMSetOperand(i.ref, C.uint(idx), v.impl.ref)
 }

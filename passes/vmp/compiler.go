@@ -15,10 +15,6 @@ type Compiler struct {
 	buf      *BytecodeBuffer
 	resolver *LabelResolver
 
-	// 外部函数表：函数名 -> ID
-	extFuncs  map[string]uint16
-	nextExtID uint16
-
 	// 局部变量表：Value 名 -> 槽位
 	locals    map[string]uint8
 	nextLocal uint8
@@ -44,8 +40,6 @@ func NewCompiler(r *rand.Rand) *Compiler {
 		mapper:     mapper,
 		buf:        NewBytecodeBuffer(mapper),
 		resolver:   NewLabelResolver(),
-		extFuncs:   make(map[string]uint16),
-		nextExtID:  0,
 		locals:     make(map[string]uint8),
 		nextLocal:  0,
 		params:     make(map[uintptr]uint8),
@@ -56,11 +50,10 @@ func NewCompiler(r *rand.Rand) *Compiler {
 
 // CompileResult 包含编译结果
 type CompileResult struct {
-	Bytecode   []byte            // 编译后的字节码
-	Mapper     *OpcodeMapper     // opcode 映射（运行时需要）
-	ExtFuncs   map[string]uint16 // 外部函数表
-	LocalCount int               // 局部变量数量
-	ParamCount int               // 参数数量
+	Bytecode   []byte        // 编译后的字节码
+	Mapper     *OpcodeMapper // opcode 映射（运行时需要）
+	LocalCount int           // 局部变量数量
+	ParamCount int           // 参数数量
 }
 
 // MaxLocals 与 runtime/src/vm_entry.c 的 VM_LOCAL_SIZE 一致；超出即拒绝编译
@@ -130,7 +123,6 @@ func (c *Compiler) Compile(fn llvmwrap.Function) (*CompileResult, error) {
 	return &CompileResult{
 		Bytecode:   c.buf.Bytes(),
 		Mapper:     c.mapper,
-		ExtFuncs:   c.extFuncs,
 		LocalCount: int(c.nextLocal),
 		ParamCount: len(c.params),
 	}, nil

@@ -39,7 +39,6 @@ func (bb basicBlockImpl) name() string                                       { r
 func (i instructionImpl) opcode() string                                     { return "" }
 func (i instructionImpl) replaceAllUsesWith(Instruction)                     {}
 func (i instructionImpl) operands() []Value                                  { return nil }
-func (i instructionImpl) calledValue() Value                                 { return Value{} }
 func (i instructionImpl) icmpPredicate() string                              { return "" }
 func (i instructionImpl) setOperand(int, Value)                              {}
 func (i instructionImpl) eraseFromParent()                                   {}
