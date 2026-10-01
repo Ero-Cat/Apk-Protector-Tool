@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -89,7 +88,7 @@ func effectiveKeywords(configured []string) []string {
 	return antiEnvKeywords
 }
 
-func scanAPK(apkPath string, cfg ScanningConfig) (*ScanResults, error) {
+func scanAPK(apkPath string, cfg ScanningConfig, runner CommandRunner) (*ScanResults, error) {
 	reader, err := zip.OpenReader(apkPath)
 	if err != nil {
 		return nil, err
@@ -209,7 +208,7 @@ func scanAPK(apkPath string, cfg ScanningConfig) (*ScanResults, error) {
 	result.AntiProxy = mapKeysSorted(antiProxySet)
 	result.InnerAPKCount = len(result.EmbeddedAPKs)
 
-	result.Signature = verifySignature(apkPath, cfg.ApksignerPath)
+	result.Signature = verifySignature(apkPath, cfg.ApksignerPath, runner)
 
 	return result, nil
 }
@@ -293,15 +292,14 @@ func mapKeysSorted(m map[string]struct{}) []string {
 	return out
 }
 
-func verifySignature(apkPath, apksigner string) SignatureSummary {
+func verifySignature(apkPath, apksigner string, runner CommandRunner) SignatureSummary {
 	if apksigner == "" {
 		return SignatureSummary{
 			JanusRisk: true,
 			Error:     "apksigner path not configured",
 		}
 	}
-	cmd := exec.Command(apksigner, "verify", "--verbose", "--print-certs", apkPath)
-	output, err := cmd.CombinedOutput()
+	output, err := runner.Output(apksigner, []string{"verify", "--verbose", "--print-certs", apkPath})
 	text := string(output)
 	summary := SignatureSummary{
 		Details: text,

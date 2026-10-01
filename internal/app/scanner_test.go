@@ -31,7 +31,7 @@ func TestScanAPKRecordsSkippedLargeTextFiles(t *testing.T) {
 	result, err := scanAPK(apk, ScanningConfig{
 		ApksignerPath: "missing-apksigner",
 		MaxScanSizeMB: 1,
-	})
+	}, realRunner{})
 	if err != nil {
 		t.Fatalf("scanAPK() error = %v", err)
 	}

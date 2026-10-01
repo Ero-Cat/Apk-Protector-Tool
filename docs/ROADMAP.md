@@ -12,7 +12,7 @@
 | [P1](#p1-vmp-端到端打通) | VMP 端到端 | 8 | L | ✅ 全部完成；真实 LLVM 链路已验证（lli 语义正确 + 真实 C 运行时执行） |
 | [P2](#p2-pass-正确性) | Pass 正确性 | 6 主条目 / 20 子项 | M–L | ✅ 全部完成（P2.1–P2.6，真实 LLVM 链路 lli 语义验证） |
 | [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 主条目 / 11 子项 | M–L | ✅ 全部实现（host 可验证部分 + 真机手动步骤文档化） |
-| [P4](#p4-测试基建) | 测试基建 | 2 主条目 / 7 子项 | M | ⏳ 已细颗粒拆分 |
+| [P4](#p4-测试基建) | 测试基建 | 2 主条目 / 7 子项 | M | ✅ 全部完成（llvm-tagged 集成测试 + CommandRunner 编排测试） |
 
 建议顺序：**P0.3 / P0.5（安全修复，小改动大收益）→ P0.1 / P0.2（TUI 与 CLI 重构）→ P1 → P2 → P3 → P4 穿插进行**。
 
@@ -274,13 +274,16 @@
 
 ## P4 测试基建
 
-### P4.1 CommandRunner 抽象落地 ⏳
+### P4.1 CommandRunner 抽象落地 ✅ 已实现
 
-- **现状**：`.agent/workflows/testing_strategy.md` 规定"外部二进制经 `CommandRunner` 接口 mock"，但 `internal/app/tool.go` 直接 `exec.Command` 调 zipalign/apksigner/keytool——策略停留在文档，签名/对齐编排路径零测试。
-- **P4.1.1 接口抽象** ⏳：`CommandRunner` 接口（运行 + LookPath），真实实现为默认值，Tool/Scanner 注入。
-- **P4.1.2 编排测试** ⏳：表驱动覆盖"工具缺失/命令失败/成功"三路径 × scan→protect→align→sign→verify→report 的错误信息与报告步骤。
-- **P4.1.3 e2e 保持绿** ⏳：真实二进制路径行为不变。
-- **验收标准**：`internal/app` 编排逻辑获得无外部依赖的测试覆盖。
+> **落地情况**（2026-10）：`internal/app/runner.go` 定义 `CommandRunner` 接口（Run 流式执行 / Output 捕获输出 / LookPath），真实实现透传 os/exec；`Tool.Runner` 默认注入，preflight 的 checkBinary、runCommand、scanner 验签全部经接口。表驱动编排测试（`tool_orchestration_test.go`，fake runner 仿真 zipalign/keytool/apksigner 的产物落盘）覆盖：
+> 1. **工具缺失**——preflight 在任何阶段前拦下，错误点名工具与安装建议，零步骤执行；
+> 2. **中段失败**——前序阶段保持 completed、失败步骤状态正确、后续阶段不跑；
+> 3. **全链路成功**——scan→protect→align→sign→verify→finalize 全 completed，产物/密钥/工件断言；keystore 存在时 keytool 不调用、缺失+CreateKeystore 时经 runner 生成。
+
+- **P4.1.1 接口抽象** ✅
+- **P4.1.2 编排测试** ✅（四用例，CI 无 Android 工具可跑）
+- **P4.1.3 e2e 保持绿** ✅（真实二进制路径行为不变）
 
 ### P4.2 LLVM 集成测试（`-tags llvm`）✅ 已实现
 

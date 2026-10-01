@@ -32,7 +32,7 @@ func TestScanUsesConfiguredKeywords(t *testing.T) {
 	}
 
 	// 自定义关键词只含 custommarker：内置的 frida 不应再报。
-	results, err := scanAPK(apk, ScanningConfig{Keywords: []string{"custommarker"}, MaxScanSizeMB: 4})
+	results, err := scanAPK(apk, ScanningConfig{Keywords: []string{"custommarker"}, MaxScanSizeMB: 4}, realRunner{})
 	if err != nil {
 		t.Fatalf("scanAPK: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestScanUsesConfiguredKeywords(t *testing.T) {
 	}
 
 	// 空配置回退内置表：frida 命中。
-	results, err = scanAPK(apk, ScanningConfig{MaxScanSizeMB: 4})
+	results, err = scanAPK(apk, ScanningConfig{MaxScanSizeMB: 4}, realRunner{})
 	if err != nil {
 		t.Fatalf("scanAPK: %v", err)
 	}

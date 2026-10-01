@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -35,11 +34,15 @@ type Tool struct {
 	// SkipOutput runs the pipeline without producing a final APK artifact
 	// (scan-only mode: the report is the deliverable).
 	SkipOutput bool
+
+	// Runner executes external binaries (P4.1). nil 时用真实 os/exec 实现；
+	// 编排测试注入假实现以脱离 Android 工具链。
+	Runner CommandRunner
 }
 
 // NewTool creates a Tool instance.
 func NewTool(cfg *Config) *Tool {
-	return &Tool{cfg: cfg}
+	return &Tool{cfg: cfg, Runner: realRunner{}}
 }
 
 func (t *Tool) progress(stage string) {
@@ -248,11 +251,11 @@ func (t *Tool) transformsOutput() bool {
 // implicit zipalign requirement for APKs that ship native libs.
 func (t *Tool) preflight(inputAPK string) error {
 	if t.cfg.Signing.Enabled {
-		if err := checkBinary(t.cfg.Signing.ApksignerPath); err != nil {
+		if err := t.checkBinary(t.cfg.Signing.ApksignerPath); err != nil {
 			return fmt.Errorf("signing: %w", err)
 		}
 		if !fileExists(t.cfg.Signing.Keystore) && t.cfg.Signing.CreateKeystore {
-			if err := checkBinary(t.cfg.Signing.KeytoolPath); err != nil {
+			if err := t.checkBinary(t.cfg.Signing.KeytoolPath); err != nil {
 				return fmt.Errorf("keystore generation: %w", err)
 			}
 		}
@@ -266,7 +269,7 @@ func (t *Tool) preflight(inputAPK string) error {
 		needAlign = hasNativeLibs
 	}
 	if needAlign {
-		if err := checkBinary(t.cfg.Zipalign.Path); err != nil {
+		if err := t.checkBinary(t.cfg.Zipalign.Path); err != nil {
 			return fmt.Errorf("alignment (required for APKs with native libs): %w", err)
 		}
 	}
@@ -274,8 +277,8 @@ func (t *Tool) preflight(inputAPK string) error {
 }
 
 // checkBinary validates an external tool path: explicit paths must exist,
-// bare names are looked up on PATH.
-func checkBinary(name string) error {
+// bare names are looked up on PATH (via the injected runner, P4.1).
+func (t *Tool) checkBinary(name string) error {
 	if name == "" {
 		return fmt.Errorf("tool path is empty")
 	}
@@ -285,7 +288,7 @@ func checkBinary(name string) error {
 		}
 		return nil
 	}
-	if _, err := exec.LookPath(name); err != nil {
+	if _, err := t.Runner.LookPath(name); err != nil {
 		return fmt.Errorf("%q not found in PATH — install Android build-tools or set an explicit path via config/flags", name)
 	}
 	return nil
@@ -300,7 +303,7 @@ func (t *Tool) runScanning(apkPath string, report *Report) error {
 	defer func() {
 		report.Steps = append(report.Steps, step)
 	}()
-	results, err := scanAPK(apkPath, t.cfg.Scanning)
+	results, err := scanAPK(apkPath, t.cfg.Scanning, t.Runner)
 	if err != nil {
 		step.Status = "failed"
 		step.Details = err.Error()
@@ -552,25 +555,7 @@ func parseTimeout(value string) (time.Duration, error) {
 }
 
 func (t *Tool) runCommand(ctx context.Context, bin string, args []string, env map[string]string, timeout time.Duration) error {
-	if bin == "" {
-		return fmt.Errorf("command path is empty")
-	}
-	cctx := ctx
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		cctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		cctx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
-
-	cmd := exec.CommandContext(cctx, bin, args...)
-	cmd.Stdout = t.stdout()
-	cmd.Stderr = t.stderr()
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), formatEnv(env)...)
-	}
-	return cmd.Run()
+	return t.Runner.Run(ctx, bin, args, env, timeout, t.stdout(), t.stderr())
 }
 
 func formatEnv(env map[string]string) []string {
