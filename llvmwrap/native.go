@@ -267,58 +267,104 @@ func (bb basicBlockImpl) name() string {
 // opcodeNames maps LLVMOpcode enum values to textual opcode names. The C API
 // has no LLVMGetOpcodeName accessor, so the mapping lives here and must track
 // the LLVMOpcode enum in llvm-c/Core.h (values are stable by contract).
-var opcodeNames = map[C.LLVMOpcode]string{
-	C.LLVMRet:           "ret",
-	C.LLVMUncondBr:      "br",
-	C.LLVMCondBr:        "br",
-	C.LLVMSwitch:        "switch",
-	C.LLVMIndirectBr:    "indirectbr",
-	C.LLVMInvoke:        "invoke",
-	C.LLVMUnreachable:   "unreachable",
-	C.LLVMCallBr:        "callbr",
-	C.LLVMFNeg:          "fneg",
-	C.LLVMCall:          "call",
-	C.LLVMFence:         "fence",
-	C.LLVMICmp:          "icmp",
-	C.LLVMFCmp:          "fcmp",
-	C.LLVMPHI:           "phi",
-	C.LLVMSelect:        "select",
-	C.LLVMFreeze:        "freeze",
-	C.LLVMAlloca:        "alloca",
-	C.LLVMLoad:          "load",
-	C.LLVMStore:         "store",
-	C.LLVMGetElementPtr: "getelementptr",
-	C.LLVMTrunc:         "trunc",
-	C.LLVMZExt:          "zext",
-	C.LLVMSExt:          "sext",
-	C.LLVMFPToUI:        "fptoui",
-	C.LLVMFPToSI:        "fptosi",
-	C.LLVMUIToFP:        "uitofp",
-	C.LLVMSIToFP:        "sitofp",
-	C.LLVMFPTrunc:       "fptrunc",
-	C.LLVMFPExt:         "fpext",
-	C.LLVMPtrToInt:      "ptrtoint",
-	C.LLVMIntToPtr:      "inttoptr",
-	C.LLVMBitCast:       "bitcast",
-	C.LLVMAddrSpaceCast: "addrspacecast",
-	C.LLVMAdd:           "add",
-	C.LLVMFAdd:          "fadd",
-	C.LLVMSub:           "sub",
-	C.LLVMFSub:          "fsub",
-	C.LLVMMul:           "mul",
-	C.LLVMFMul:          "fmul",
-	C.LLVMUDiv:          "udiv",
-	C.LLVMSDiv:          "sdiv",
-	C.LLVMFDiv:          "fdiv",
-	C.LLVMURem:          "urem",
-	C.LLVMSRem:          "srem",
-	C.LLVMFRem:          "frem",
-	C.LLVMShl:           "shl",
-	C.LLVMLShr:          "lshr",
-	C.LLVMAShr:          "ashr",
-	C.LLVMAnd:           "and",
-	C.LLVMOr:            "or",
-	C.LLVMXor:           "xor",
+//
+// The br entries cannot use compile-time constants: LLVM <= 18 reports slot 2
+// (LLVMBr, shared by both branch forms) and has no UncondBr/CondBr names,
+// while LLVM >= 19 moved them to dedicated ABI slots (70/71) and dropped the
+// old name. We probe the running library with real br/condbr instructions
+// instead, so one build serves every version.
+var opcodeNames = buildOpcodeNames()
+
+func buildOpcodeNames() map[C.LLVMOpcode]string {
+	m := map[C.LLVMOpcode]string{
+		C.LLVMRet:           "ret",
+		C.LLVMSwitch:        "switch",
+		C.LLVMIndirectBr:    "indirectbr",
+		C.LLVMInvoke:        "invoke",
+		C.LLVMUnreachable:   "unreachable",
+		C.LLVMCallBr:        "callbr",
+		C.LLVMFNeg:          "fneg",
+		C.LLVMCall:          "call",
+		C.LLVMFence:         "fence",
+		C.LLVMICmp:          "icmp",
+		C.LLVMFCmp:          "fcmp",
+		C.LLVMPHI:           "phi",
+		C.LLVMSelect:        "select",
+		C.LLVMFreeze:        "freeze",
+		C.LLVMAlloca:        "alloca",
+		C.LLVMLoad:          "load",
+		C.LLVMStore:         "store",
+		C.LLVMGetElementPtr: "getelementptr",
+		C.LLVMTrunc:         "trunc",
+		C.LLVMZExt:          "zext",
+		C.LLVMSExt:          "sext",
+		C.LLVMFPToUI:        "fptoui",
+		C.LLVMFPToSI:        "fptosi",
+		C.LLVMUIToFP:        "uitofp",
+		C.LLVMSIToFP:        "sitofp",
+		C.LLVMFPTrunc:       "fptrunc",
+		C.LLVMFPExt:         "fpext",
+		C.LLVMPtrToInt:      "ptrtoint",
+		C.LLVMIntToPtr:      "inttoptr",
+		C.LLVMBitCast:       "bitcast",
+		C.LLVMAddrSpaceCast: "addrspacecast",
+		C.LLVMAdd:           "add",
+		C.LLVMFAdd:          "fadd",
+		C.LLVMSub:           "sub",
+		C.LLVMFSub:          "fsub",
+		C.LLVMMul:           "mul",
+		C.LLVMFMul:          "fmul",
+		C.LLVMUDiv:          "udiv",
+		C.LLVMSDiv:          "sdiv",
+		C.LLVMFDiv:          "fdiv",
+		C.LLVMURem:          "urem",
+		C.LLVMSRem:          "srem",
+		C.LLVMFRem:          "frem",
+		C.LLVMShl:           "shl",
+		C.LLVMLShr:          "lshr",
+		C.LLVMAShr:          "ashr",
+		C.LLVMAnd:           "and",
+		C.LLVMOr:            "or",
+		C.LLVMXor:           "xor",
+	}
+	for _, op := range probeBranchOpcodes() {
+		m[op] = "br"
+	}
+	return m
+}
+
+// probeBranchOpcodes builds throwaway br/condbr instructions and reports the
+// opcode values this LLVM build assigns them (2 on LLVM <= 18, 70/71 on
+// newer). The scratch module is malformed by construction (unterminated
+// blocks) but is never verified or written out.
+func probeBranchOpcodes() []C.LLVMOpcode {
+	modName := cstring("gp.brprobe")
+	defer C.free(unsafe.Pointer(modName))
+	mod := C.LLVMModuleCreateWithName(modName)
+	defer C.LLVMDisposeModule(mod)
+
+	fnName := cstring("probe")
+	defer C.free(unsafe.Pointer(fnName))
+	fty := C.LLVMFunctionType(C.LLVMVoidType(), nil, 0, 0)
+	fn := C.LLVMAddFunction(mod, fnName, fty)
+
+	mkName := func(s string) *C.char { return cstring(s) }
+	entry := C.LLVMAppendBasicBlock(fn, mkName("entry"))
+	cond := C.LLVMAppendBasicBlock(fn, mkName("cond"))
+	tgt := C.LLVMAppendBasicBlock(fn, mkName("tgt"))
+	alt := C.LLVMAppendBasicBlock(fn, mkName("alt"))
+
+	b := C.LLVMCreateBuilder()
+	C.LLVMPositionBuilderAtEnd(b, entry)
+	uncond := C.LLVMBuildBr(b, tgt)
+	C.LLVMPositionBuilderAtEnd(b, cond)
+	conditional := C.LLVMBuildCondBr(b, constBoolImpl(true).impl.ref, tgt, alt)
+	C.LLVMDisposeBuilder(b)
+
+	return []C.LLVMOpcode{
+		C.LLVMGetInstructionOpcode(uncond),
+		C.LLVMGetInstructionOpcode(conditional),
+	}
 }
 
 func (i instructionImpl) opcode() string {
