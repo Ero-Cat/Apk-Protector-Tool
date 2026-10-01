@@ -82,6 +82,7 @@ type Report struct {
 	Artifacts  map[string]string `json:"artifacts"`
 	Hashes     map[string]string `json:"hashes"`
 	Scan       *ScanResults      `json:"scan,omitempty"`
+	Notes      []string          `json:"notes,omitempty"`
 }
 
 // WriteReport saves the report as JSON.
@@ -167,7 +168,14 @@ func (t *Tool) Run(ctx context.Context) (*Report, error) {
 	}
 
 	t.progress("protect")
-	protectedApk, err := t.runProtections(currentApk, baseName, runDir, report)
+	// 密钥文件落在最终产物旁边（<final_output>.key，0600）：提前解析
+	// finalOutput，让 protect 阶段就能把密钥写到持久位置（ADR-0001）。
+	finalOutput := t.cfg.FinalOutput
+	if finalOutput == "" {
+		finalOutput = filepath.Join(cwd, "dist", baseName+"-protected.apk")
+	}
+	keyPath := finalOutput + ".key"
+	protectedApk, err := t.runProtections(currentApk, baseName, runDir, keyPath, report)
 	if err != nil {
 		return report, err
 	}
@@ -211,10 +219,6 @@ func (t *Tool) Run(ctx context.Context) (*Report, error) {
 	}
 	t.progress("finalize")
 
-	finalOutput := t.cfg.FinalOutput
-	if finalOutput == "" {
-		finalOutput = filepath.Join(cwd, "dist", baseName+"-protected.apk")
-	}
 	if err := os.MkdirAll(filepath.Dir(finalOutput), 0o755); err != nil {
 		return report, fmt.Errorf("create output dir: %w", err)
 	}

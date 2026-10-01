@@ -70,6 +70,15 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
             runtime/tests/test_antidebug.c -o /tmp/test_antidebug && /tmp/test_antidebug
 
+      - name: Loader crypto tests, NIST + Go cross vectors (P3.3)
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror -I runtime/android \
+            runtime/android/tests/test_aes_gcm.c runtime/android/crypto/aes_gcm.c \
+            -o /tmp/test_aes_gcm && /tmp/test_aes_gcm
+          clang -std=c11 -Wall -Wextra -Werror -I runtime/android \
+            runtime/android/tests/test_dex_decrypt.c runtime/android/dex_decrypt.c \
+            runtime/android/crypto/aes_gcm.c -o /tmp/test_dex_decrypt && /tmp/test_dex_decrypt
+
   llvm:
     name: LLVM native build (best-effort)
     runs-on: ubuntu-latest

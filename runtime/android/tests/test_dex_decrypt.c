@@ -1,0 +1,76 @@
+/**
+ * test_dex_decrypt.c - 解密核心测试（拆分密钥拼装 + 全路径）
+ *
+ * 编译运行：
+ *   clang -std=c11 -Wall -Wextra -Werror -I runtime/android \
+ *     runtime/android/tests/test_dex_decrypt.c runtime/android/dex_decrypt.c \
+ *     runtime/android/crypto/aes_gcm.c -o /tmp/test_dex_decrypt && /tmp/test_dex_decrypt
+ */
+#include <stdio.h>
+#include <string.h>
+
+#include "dex_decrypt.h"
+
+static int g_failures = 0;
+
+#define CHECK(cond)                                                     \
+    do {                                                                \
+        if (!(cond)) {                                                  \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+            g_failures++;                                               \
+        }                                                               \
+    } while (0)
+
+int main(void) {
+    /* 与 test_aes_gcm.c 的 Go 交叉向量同源。 */
+    static const uint8_t key[32] = {
+        0x52,0x47,0x5e,0x1b,0xd7,0x0b,0x39,0x3a,0x51,0x43,0x44,0xa5,0x56,0x1c,0x84,0x38,
+        0x53,0x6c,0xf2,0xa8,0x69,0x6c,0xf0,0xb8,0x8a,0x51,0x23,0x40,0x7b,0x85,0x66,0x60
+    };
+    static const uint8_t nonce[12] = {
+        0x0a,0x0b,0x0c,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09
+    };
+    static const uint8_t plain[41] = {
+        'd','e','x','\n','0','3','5',0,
+        'g','o','p','r','o','t','e','c','t',' ','d','e','m','o',' ',
+        'p','a','y','l','o','a','d',' ','0','1','2','3','4','5','6','7','8','9'
+    };
+    static const uint8_t ct_tag[57] = {
+        0xaa,0x7c,0x60,0xc9,0xa0,0x58,0x2e,0x07,0x4b,0x59,0x4e,0x4f,0x41,0x56,0x23,0x42,
+        0x72,0xed,0xb4,0xf8,0x3e,0x78,0xf2,0x47,0x08,0x91,0xd2,0x93,0x6d,0xe5,0x6f,0x0c,
+        0x78,0xbe,0x83,0x88,0xe2,0x21,0x91,0x81,0x21,0x91,0x4a,0x05,0xe8,0x9e,0xe6,0x0b,
+        0x6e,0x26,0x81,0xf0,0xd6,0x36,0x44,0x61,0xe4
+    };
+
+    /* 1. 拆分拼装：随机分片 XOR 后必须还原出原密钥。 */
+    static const uint8_t part0[32] = {
+        0x9c,0x2f,0xd1,0x4a,0x33,0x88,0x10,0xc1,0x77,0x2b,0x56,0xe0,0x4f,0xc9,0x31,0x02,
+        0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x99,0xaa,0xbb,0xcc,0xdd,0xee,0xff,0x01
+    };
+    static const uint8_t part1[32] = {
+        0xce,0x68,0x8f,0x51,0xe4,0x83,0x29,0xfb,0x26,0x68,0x12,0x45,0x19,0xd5,0xb5,0x3a,
+        0x42,0x4e,0xc1,0xec,0x3c,0x0a,0x87,0x30,0x13,0xfb,0x98,0x8c,0xa6,0x6b,0x99,0x61
+    };
+    uint8_t assembled[32];
+    const uint8_t* parts[2] = { part0, part1 };
+    goprotect_assemble_key(parts, 2, assembled);
+    CHECK(memcmp(assembled, key, 32) == 0);
+
+    /* 2. 全路径解密：拼装密钥 + nonce + 密文 -> 原始 dex 字节。 */
+    uint8_t out[64];
+    int n = goprotect_decrypt_payload(assembled, nonce, ct_tag, sizeof ct_tag, out, sizeof out);
+    CHECK(n == 41);
+    CHECK(n <= 0 || memcmp(out, plain, 41) == 0);
+
+    /* 3. 防护：容量不足与非法参数。 */
+    CHECK(goprotect_decrypt_payload(assembled, nonce, ct_tag, sizeof ct_tag, out, 16) == -1);
+    CHECK(goprotect_decrypt_payload(NULL, nonce, ct_tag, sizeof ct_tag, out, sizeof out) == -1);
+    CHECK(goprotect_decrypt_payload(assembled, nonce, ct_tag, 8, out, sizeof out) == -1);
+
+    if (g_failures == 0) {
+        printf("test_dex_decrypt: all checks passed\n");
+        return 0;
+    }
+    printf("test_dex_decrypt: %d check(s) failed\n", g_failures);
+    return 1;
+}

@@ -67,6 +67,39 @@ fi
 echo "==> config init"
 (cd "$WORK" && "$WORK/protector" config init -o cfg.yml && test -s cfg.yml)
 
+echo "==> key externalization (P3.3, ADR-0001)"
+mkdir -p "$WORK/plainpkg"
+printf '\x03\x00\x08\x00com.example.keytest' > "$WORK/plainpkg/AndroidManifest.xml"
+printf 'dex\n035\x00e2e key payload' > "$WORK/plainpkg/classes.dex"
+(cd "$WORK/plainpkg" && zip -q -r -X "$WORK/plain.apk" AndroidManifest.xml classes.dex)
+cat > "$WORK/keytest.yml" <<YML
+input_apk: $WORK/plain.apk
+final_output: $WORK/out/keytest-protected.apk
+work_dir: $WORK/wd
+protections:
+  enabled: true
+  dex_encrypt: true
+  encryption_secret: e2e-secret
+YML
+(cd "$WORK" && "$WORK/protector" run -config "$WORK/keytest.yml" > /dev/null)
+test -s "$WORK/out/keytest-protected.apk" || { echo "protected apk missing"; exit 1; }
+test -s "$WORK/out/keytest-protected.apk.key" || { echo "external key file missing"; exit 1; }
+python3 - "$WORK/out/keytest-protected.apk" "$WORK/out/keytest-protected.apk.key" <<'PY'
+import base64, json, sys, zipfile
+apk_path, key_path = sys.argv[1], sys.argv[2]
+raw = open(apk_path, "rb").read()
+keymat = json.load(open(key_path))
+aes_b64 = keymat["aes_key"]
+aes_raw = base64.b64decode(aes_b64)
+assert b"encryption_key" not in raw, "metadata embeds key field"
+for needle in (aes_b64.encode(), aes_raw.hex().encode(), aes_raw):
+    assert needle not in raw, f"artifact leaks key material ({len(needle)}B form)"
+meta = json.load(zipfile.ZipFile(apk_path).open("assets/protector/metadata.json"))
+assert meta.get("encryption_key", "") == "", "encryption_key must be empty by default"
+assert len(meta["dex_encrypted"]) == 1 and meta["dex_encrypted"][0]["nonce"], meta
+print("key externalization assertions: PASS")
+PY
+
 echo "==> optional: C interpreter unit tests"
 if command -v clang >/dev/null 2>&1; then
   clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
@@ -77,6 +110,12 @@ if command -v clang >/dev/null 2>&1; then
     runtime/tests/test_integrity.c -o "$WORK/test_integrity" && "$WORK/test_integrity"
   clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
     runtime/tests/test_antidebug.c -o "$WORK/test_antidebug" && "$WORK/test_antidebug"
+  clang -std=c11 -Wall -Wextra -Werror -I runtime/android \
+    runtime/android/tests/test_aes_gcm.c runtime/android/crypto/aes_gcm.c \
+    -o "$WORK/test_aes_gcm" && "$WORK/test_aes_gcm"
+  clang -std=c11 -Wall -Wextra -Werror -I runtime/android \
+    runtime/android/tests/test_dex_decrypt.c runtime/android/dex_decrypt.c \
+    runtime/android/crypto/aes_gcm.c -o "$WORK/test_dex_decrypt" && "$WORK/test_dex_decrypt"
 else
   echo "clang not found, skipping"
 fi

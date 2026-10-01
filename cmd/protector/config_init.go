@@ -35,6 +35,10 @@ protections:
   compress_before_encrypt: true
   # 加密密钥：强烈建议走环境变量引用，不要明文
   encryption_secret: "${APK_PROTECT_SECRET}"
+  # legacy 逃生开关（不推荐）：把密钥内嵌进 APK 内 metadata.json。
+  # 默认 false——密钥写 <final_output>.key（0600），经发布渠道注入加载器，
+  # 见 docs/design/adr-0001-dex-key-delivery.md
+  embed_key: false
 
 scanning:
   enabled: true

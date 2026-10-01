@@ -86,6 +86,10 @@ type ProtectionConfig struct {
 	PseudoEncrypt         bool   `json:"pseudo_encrypt" yaml:"pseudo_encrypt"`
 	CompressBeforeEncrypt bool   `json:"compress_before_encrypt" yaml:"compress_before_encrypt"`
 	EncryptionSecret      string `json:"encryption_secret" yaml:"encryption_secret"`
+	// EmbedKey 是 legacy 逃生开关：把密钥材料内嵌进 APK 内 metadata.json。
+	// 密钥与密文同体没有任何安全性（见 docs/design/adr-0001-dex-key-delivery.md），
+	// 仅供兼容旧的外部分析流程；默认 false，密钥落 <final_output>.key。
+	EmbedKey bool `json:"embed_key" yaml:"embed_key"`
 }
 
 // ScanningConfig controls APK feature scanning.

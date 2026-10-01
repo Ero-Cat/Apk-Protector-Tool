@@ -43,7 +43,7 @@ type pseudoRecord struct {
 	Bytes    int    `json:"bytes"`
 }
 
-func (t *Tool) runProtections(currentApk, baseName, runDir string, report *Report) (string, error) {
+func (t *Tool) runProtections(currentApk, baseName, runDir, keyPath string, report *Report) (string, error) {
 	cfg := t.cfg.Protections
 	if !cfg.Enabled {
 		return "", nil
@@ -69,6 +69,7 @@ func (t *Tool) runProtections(currentApk, baseName, runDir string, report *Repor
 	}
 
 	meta := protectionMetadata{}
+	keyMat := keyMaterial{}
 	modified := false
 
 	if cfg.RandomPackage {
@@ -85,15 +86,17 @@ func (t *Tool) runProtections(currentApk, baseName, runDir string, report *Repor
 	}
 
 	var key []byte
-	var keyB64 string
 	if cfg.DexEncrypt || cfg.MultiDexEncrypt || cfg.PseudoEncrypt {
-		key, keyB64, err = deriveKey(cfg.EncryptionSecret)
+		key, keyMat.AESKey, err = deriveKey(cfg.EncryptionSecret)
 		if err != nil {
 			step.Status = "failed"
 			step.Details = err.Error()
 			return "", err
 		}
-		meta.EncryptionKey = keyB64
+		// legacy embed_key：密钥与密文同体，仅为兼容旧分析流程（ADR-0001）。
+		if cfg.EmbedKey {
+			meta.EncryptionKey = keyMat.AESKey
+		}
 	}
 
 	if cfg.DexEncrypt || cfg.MultiDexEncrypt {
@@ -110,11 +113,15 @@ func (t *Tool) runProtections(currentApk, baseName, runDir string, report *Repor
 	}
 
 	if cfg.PseudoEncrypt {
-		record, err := createPseudoEncryption(extractDir)
+		record, pseudoKey, err := createPseudoEncryption(extractDir)
 		if err != nil {
 			step.Status = "failed"
 			step.Details = err.Error()
 			return "", err
+		}
+		keyMat.PseudoKey = pseudoKey
+		if cfg.EmbedKey {
+			record.Key = pseudoKey
 		}
 		meta.Pseudo = record
 		modified = true
@@ -133,6 +140,20 @@ func (t *Tool) runProtections(currentApk, baseName, runDir string, report *Repor
 	}
 	report.Artifacts["protection_metadata"] = metadataPath
 
+	// 密钥外置（ADR-0001）：0600 落盘在产物旁边，绝不进入 APK。
+	if keyMat.AESKey != "" || keyMat.PseudoKey != "" {
+		if err := writeKeyFile(keyPath, keyMat); err != nil {
+			step.Status = "failed"
+			step.Details = err.Error()
+			return "", err
+		}
+		report.Artifacts["protection_key"] = keyPath
+		if !cfg.EmbedKey {
+			report.Notes = append(report.Notes,
+				"encryption key material written next to the artifact ("+filepath.Base(keyPath)+"); it is NOT embedded in the APK — deliver it to your loader via your release channel (see docs/design/adr-0001-dex-key-delivery.md)")
+		}
+	}
+
 	newApk := filepath.Join(runDir, baseName+"-protected.apk")
 	if err := zipDirectory(extractDir, newApk, entryMethods); err != nil {
 		step.Status = "failed"
@@ -143,6 +164,26 @@ func (t *Tool) runProtections(currentApk, baseName, runDir string, report *Repor
 	step.Status = "completed"
 	step.Artifact = newApk
 	return newApk, nil
+}
+
+// keyMaterial 是外置密钥文件的内容：AES（dex 加密）与 XOR（伪加密）密钥
+// 的 base64。文件权限 0600，与 APK 分离交付（ADR-0001）。
+type keyMaterial struct {
+	AESKey    string `json:"aes_key,omitempty"`
+	PseudoKey string `json:"pseudo_key,omitempty"`
+}
+
+func writeKeyFile(path string, mat keyMaterial) error {
+	data, err := json.MarshalIndent(mat, "", "  ")
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
 }
 
 func unzipArchive(src, dest string) (map[string]uint16, error) {
@@ -406,15 +447,18 @@ func deflateBytes(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func createPseudoEncryption(root string) (*pseudoRecord, error) {
+// createPseudoEncryption XOR-encrypts the manifest into a decoy artifact and
+// returns the record plus the raw key (base64) for the caller to route into
+// the external key file (or embed in legacy mode).
+func createPseudoEncryption(root string) (*pseudoRecord, string, error) {
 	manifestPath := filepath.Join(root, "AndroidManifest.xml")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("pseudo encryption requires AndroidManifest.xml: %w", err)
+		return nil, "", fmt.Errorf("pseudo encryption requires AndroidManifest.xml: %w", err)
 	}
 	key := make([]byte, 16)
 	if _, err := rand.Read(key); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := make([]byte, len(data))
 	for i := range data {
@@ -422,18 +466,17 @@ func createPseudoEncryption(root string) (*pseudoRecord, error) {
 	}
 	target := filepath.Join(root, "assets", "protector")
 	if err := os.MkdirAll(target, 0o755); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	filePath := filepath.Join(target, "manifest.pseudo")
 	if err := os.WriteFile(filePath, out, 0o644); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	return &pseudoRecord{
 		Source:   "AndroidManifest.xml",
-		Key:      base64.StdEncoding.EncodeToString(key),
 		Artifact: "assets/protector/manifest.pseudo",
 		Bytes:    len(data),
-	}, nil
+	}, base64.StdEncoding.EncodeToString(key), nil
 }
 
 func persistMetadata(root, runDir, baseName string, meta protectionMetadata) (string, error) {

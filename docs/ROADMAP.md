@@ -11,7 +11,7 @@
 | [P0](#p0-加固-ux-与配置安全) | 加固 UX 与配置安全（protector） | 5 | M | ✅ 全部完成 |
 | [P1](#p1-vmp-端到端打通) | VMP 端到端 | 8 | L | ✅ 全部完成；真实 LLVM 链路已验证（lli 语义正确 + 真实 C 运行时执行） |
 | [P2](#p2-pass-正确性) | Pass 正确性 | 6 主条目 / 20 子项 | M–L | ✅ 全部完成（P2.1–P2.6，真实 LLVM 链路 lli 语义验证） |
-| [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 主条目 / 11 子项 | M–L | ⏳ 已细颗粒拆分；host 可验证部分推进中 |
+| [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 主条目 / 11 子项 | M–L | ✅ 全部实现（host 可验证部分 + 真机手动步骤文档化） |
 | [P4](#p4-测试基建) | 测试基建 | 2 主条目 / 7 子项 | M | ⏳ 已细颗粒拆分 |
 
 建议顺序：**P0.3 / P0.5（安全修复，小改动大收益）→ P0.1 / P0.2（TUI 与 CLI 重构）→ P1 → P2 → P3 → P4 穿插进行**。
@@ -246,15 +246,29 @@
 - **P3.2.2 并入 check_frida** ✅
 - **P3.2.3 host 单测** ✅
 
-### P3.3 DEX 密钥外置 + NDK 加载器 demo 🔴 安全 ⏳
+### P3.3 DEX 密钥外置 + NDK 加载器 demo 🔴 安全 ✅ 已实现（host 验证）
 
-- **现状**：`internal/app/protections.go` 把 AES 密钥 base64 写进 APK 内 `assets/protector/metadata.json`——密钥与密文同体，对抗静态提取无意义；仓库不含 Android 侧加载/解密组件，加固包开箱跑不起来。
-- **P3.3.0 ADR** ⏳：`docs/design/adr-0001-dex-key-delivery.md` 记录取舍（编译期注入拆分 vs JNI 拼装+签名绑定 vs 白盒密码）。
-- **P3.3.1 metadata 拆分与密钥外置** ⏳：in-APK 元数据只留非机密（算法/nonce/长度/映射）；密钥写 `<final_output>.key`（0600）；保留 legacy 内嵌逃生开关（默认关，文档标注不安全）。
-- **P3.3.2 NDK 加载器 demo** ⏳：`runtime/android/`——mini AES-GCM C 实现（与 Go crypto 向量双锚定）、JNI 解密交付、Java `InMemoryDexClassLoader` 示例；解密核心保持 host 可编译可测。
-- **P3.3.3 host 等价验收** ⏳：e2e 断言加固产物无密钥材料（原文/base64/hex 三态扫描）；C 侧共享 golden 向量解密 Go 密文还原原始 dex 字节。
-- **P3.3.4 真机手动验收** ⏳：demo App 真机启动步骤文档化。
-- **验收标准**：APK 内不再含可直接使用的密钥材料（host 可验证）；真机启动为手动步骤。
+> **落地情况**（2026-10，见 [ADR-0001](design/adr-0001-dex-key-delivery.md)）：
+> 1. **密钥外置**——默认配置下 AES 密钥与伪加密 XOR 密钥**不再进入 APK**：
+   `metadata.json` 只留运行时元数据（算法/nonce/长度/映射），密钥写
+   `<final_output>.key`（0600），报告新增 `protection_key` 工件与提示 note；
+   `protections.embed_key` 为 legacy 逃生开关（默认关，模板文档标注不安全）。
+> 2. **NDK 加载器 demo**——`runtime/android/`：`crypto/aes_gcm.c` 最小
+   AES-256-GCM（NIST 向量 + Go 交叉向量双锚定，篡改/错钥验签必败）、
+   `dex_decrypt.c` 拆分密钥拼装核心（host 可测）、`goprotect_loader.c` JNI
+   胶水（读 assets → 拼密钥 → 解密）、Java `InMemoryDexClassLoader` 示例、
+   NDK CMake 与 README（真机手动验收步骤文档化）。
+> 3. **host 等价验收**——Go 测试（`protections_key_test.go`）：产物三态扫描
+   （原文/base64/hex）无密钥、metadata 无密钥字段、外置密钥 + nonce 解密
+   还原原始 dex 字节、legacy 模式行为锚定；e2e：CLI 全链路同样断言；
+   CI：加载器加密测试双向量绿。
+> 真机 demo App 启动为文档化手动步骤（`runtime/android/README.md`）。
+
+- **P3.3.0 ADR** ✅（取舍：外置基线 + 拆分常量作加载器实现细节）
+- **P3.3.1 metadata 拆分与密钥外置** ✅（embed_key legacy 开关保留）
+- **P3.3.2 NDK 加载器 demo** ✅（解密核心 host 可编译可测）
+- **P3.3.3 host 等价验收** ✅（三态扫描 + 解密往返，Go 测试与 e2e 双覆盖）
+- **P3.3.4 真机手动验收** ✅（步骤文档化于 runtime/android/README.md）
 
 ---
 
