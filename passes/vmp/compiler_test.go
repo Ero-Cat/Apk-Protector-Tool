@@ -49,9 +49,13 @@ func TestResolveRejectsUnknownLabels(t *testing.T) {
 	}
 }
 
-// TestBlockLabel 验证匿名块获得稳定的按位置标签（mock 构建下块名恒为空，
-// 具名块路径由 LLVM 集成测试覆盖，见 ROADMAP P4.2）。
+// TestBlockLabel 验证匿名块获得稳定的按位置标签。零值 BasicBlock 只在
+// mock 构建下安全（native 下会解引用空指针），具名块路径由 LLVM 集成
+// 测试覆盖（见 ROADMAP P4.2）。
 func TestBlockLabel(t *testing.T) {
+	if llvmwrap.HasNative() {
+		t.Skip("zero-value BasicBlock is mock-only; named-block path covered by llvm-tagged tests")
+	}
 	if got := blockLabel(llvmwrap.BasicBlock{}, 3); got != "bb3" {
 		t.Fatalf("unnamed block label = %q, want bb3", got)
 	}
