@@ -8,6 +8,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -60,34 +68,84 @@ static int check_tracer_pid(void) {
 }
 
 /**
+ * 探测本机 TCP 端口是否有监听（P3.2，跨平台）。
+ *
+ * 非阻塞 connect + 150ms select：端口关闭时本地回环立即 ECONNREFUSED，
+ * 不产生等待开销；连接成功即视为监听存在。
+ */
+int goprotect_probe_port(uint16_t port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return 0;
+    }
+
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(0x7F000001u); /* 127.0.0.1 */
+
+    int open = 0;
+    int rc = connect(fd, (struct sockaddr*)&addr, sizeof(addr));
+    if (rc == 0) {
+        open = 1;
+    } else if (rc < 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK)) {
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 150000; /* 150 ms */
+        fd_set wset;
+        FD_ZERO(&wset);
+        FD_SET(fd, &wset);
+        if (select(fd + 1, NULL, &wset, NULL, &tv) > 0) {
+            int soerr = 0;
+            socklen_t slen = sizeof(soerr);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &slen) == 0 && soerr == 0) {
+                open = 1;
+            }
+        }
+    }
+
+    close(fd);
+    return open;
+}
+
+/**
  * 检测 Frida 注入
  *
  * 通过检查常见的 Frida 特征：
- * - frida-server 端口 (27042)
- * - frida-agent 库
- * - /proc/self/maps 中的 frida 字符串
+ * - frida-server / frida-gadget 默认端口 (27042 / 27043)
+ * - /proc/self/maps 中的 frida / gadget 字符串（Android）
  */
+static const uint16_t kFridaPorts[] = {27042, 27043};
+
 static int check_frida(void) {
 #ifdef __ANDROID__
     char line[512];
     FILE* f = fopen("/proc/self/maps", "r");
-    if (f == NULL) return 0;
+    if (f != NULL) {
+        while (fgets(line, sizeof(line), f)) {
+            if (strstr(line, "frida") || strstr(line, "gadget")) {
+                fclose(f);
+                return 1;
+            }
+        }
+        fclose(f);
+    }
+#endif
 
-    while (fgets(line, sizeof(line), f)) {
-        if (strstr(line, "frida") || strstr(line, "gadget")) {
-            fclose(f);
+    /* 端口探测在 host 与 Android 上都可用。 */
+    for (size_t i = 0; i < sizeof(kFridaPorts) / sizeof(kFridaPorts[0]); i++) {
+        if (goprotect_probe_port(kFridaPorts[i])) {
             return 1;
         }
     }
-    fclose(f);
-
-    /* 检查常见 Frida 端口 */
-    /* 省略实现：需要网络 socket 检测 */
 
     return 0;
-#else
-    return 0;
-#endif
 }
 
 /**

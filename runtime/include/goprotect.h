@@ -22,14 +22,39 @@ extern "C" {
 /**
  * 完整性校验钩子
  *
- * 在编译期被插入到关键函数入口。应用应实现此函数以执行：
- * - DEX 文件哈希校验
- * - SO 库完整性检查
- * - 签名验证
+ * 在编译期被插入到关键函数入口。注册过的区域会被真实复算哈希比对
+ * （见下方的区域注册 API）；未注册的 id 一次性告警放行。
  *
  * @param region_id 区域标识符，用于区分不同的检查点
  */
 void __goprotect_check_integrity(uint32_t region_id);
+
+/* 完整性策略（goprotect_set_integrity_policy） */
+#define GOPROTECT_INTEGRITY_POLICY_LOG    0 /* 记录并继续（默认） */
+#define GOPROTECT_INTEGRITY_POLICY_EXIT   1 /* 失败即 abort() */
+#define GOPROTECT_INTEGRITY_POLICY_ZEROIZE 2 /* 尽力擦除区域内容 */
+
+/**
+ * 注册受保护区域：立即对 [start, start+len) 计算 FNV-1a 基线。
+ * 必须在区域内容尚可信时（应用启动早期）调用。
+ */
+void goprotect_register_region(uint32_t region_id, const void* start, size_t len);
+
+/* 显式校验：1 = 哈希匹配基线，0 = 不匹配或未注册。 */
+int goprotect_verify_region(uint32_t region_id);
+
+/* 设置失败策略（默认 LOG）。 */
+void goprotect_set_integrity_policy(int policy);
+
+/* 失败计数与统计。 */
+int goprotect_has_integrity_failures(void);
+void goprotect_get_integrity_stats(int* check_count, int* failure_count);
+
+/**
+ * 探测 127.0.0.1:<port> 是否有监听（frida-server/gadget 默认 27042/27043）。
+ * 返回 1 表示端口开放。跨平台（POSIX）。
+ */
+int goprotect_probe_port(uint16_t port);
 
 /* ============================================================================
  * 反调试

@@ -230,21 +230,21 @@
 
 ## P3 Android 运行时完善
 
-### P3.1 完整性校验真实化 ⏳
+### P3.1 完整性校验真实化 ✅ 已实现
 
-- **现状**：`runtime/src/integrity.c` 注册时直接 `verified = 1`，从不计算哈希；`g_integrity_failures` 永不增长；全仓无任何 `goprotect_register_region` 调用（pass 产出的检查 id 全部落入 "unknown region" 告警）。
-- **P3.1.1 真哈希与基线复检** ⏳：实现 FNV-1a64；注册时对 `[start, start+len)` 算基线，检查时复检比对。
-- **P3.1.2 失败策略** ⏳：不匹配累计 `g_integrity_failures` 并按策略执行（LOG / EXIT / ZEROIZE，`goprotect_set_integrity_policy` 可配）；未注册 id 一次性告警放行，防 pass 产出 id 误报。
-- **P3.1.3 host 单测** ⏳：`runtime/tests/test_integrity.c`（基线通过 / 篡改检出 / 未知区域放行），接入 CI runtime job 与 e2e。
-- **验收标准**：篡改已注册区域后校验返回失败且计数增长（host 可验证；NDK 交叉编译矩阵列为后续）。
+> **落地情况**（2026-10）：`goprotect_register_region(id, start, len)` 注册即计算 FNV-1a 基线；`__goprotect_check_integrity` / `goprotect_verify_region` 复算比对——不匹配累计 `g_integrity_failures` 并按策略执行（`goprotect_set_integrity_policy`：LOG / EXIT=abort / ZEROIZE=尽力擦除）；未注册 id 一次性告警放行（插桩检查点不再刷屏也不误报）。`runtime/tests/test_integrity.c` 覆盖基线/篡改检出/计数保留/未注册放行/ZEROIZE 擦除，接入 CI runtime job 与 e2e。NDK 交叉编译矩阵与"构建期自动生成区域表"列为后续（与应用集成方式耦合，见 P3.3 ADR）。
 
-### P3.2 Frida 端口检测 ⏳
+- **P3.1.1 真哈希与基线复检** ✅
+- **P3.1.2 失败策略** ✅（LOG/EXIT/ZEROIZE 可配）
+- **P3.1.3 host 单测** ✅（篡改检出双向验证）
 
-- **现状**：`runtime/src/antidebug.c` 的 check_frida 已有 `/proc/self/maps` 扫描，端口探测注释"省略实现：需要网络 socket 检测"。
-- **P3.2.1 端口探测函数** ⏳：跨平台 `goprotect_probe_port()`（非阻塞 connect + 150ms poll/select）。
-- **P3.2.2 并入 check_frida** ⏳：探测 27042/27043 并入现有检测结果通道。
-- **P3.2.3 host 单测** ⏳：`runtime/tests/test_antidebug.c`（临时监听端口→阳性；关闭后→阴性）。
-- **验收标准**：host 单测双向验证；真机 frida-server 阳性为文档化手动验收步骤。
+### P3.2 Frida 端口检测 ✅ 已实现（host 侧）
+
+> **落地情况**（2026-10）：新增跨平台 `goprotect_probe_port()`（非阻塞 connect + 150ms select，回环关闭端口立即 ECONNREFUSED 无等待开销），27042/27043 探测并入 check_frida（Android 侧保留 maps 扫描，端口探测 host 亦生效）。`runtime/tests/test_antidebug.c` 双向验证（临时监听→阳性；关闭→阴性）。真机 frida-server 阳性验收为文档化手动步骤。
+
+- **P3.2.1 端口探测函数** ✅
+- **P3.2.2 并入 check_frida** ✅
+- **P3.2.3 host 单测** ✅
 
 ### P3.3 DEX 密钥外置 + NDK 加载器 demo 🔴 安全 ⏳
 

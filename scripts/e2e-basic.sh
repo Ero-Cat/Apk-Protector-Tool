@@ -73,6 +73,10 @@ if command -v clang >/dev/null 2>&1; then
     runtime/tests/test_vm.c -o "$WORK/test_vm" && "$WORK/test_vm"
   clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
     runtime/tests/test_hooks.c -o "$WORK/test_hooks" && "$WORK/test_hooks"
+  clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
+    runtime/tests/test_integrity.c -o "$WORK/test_integrity" && "$WORK/test_integrity"
+  clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
+    runtime/tests/test_antidebug.c -o "$WORK/test_antidebug" && "$WORK/test_antidebug"
 else
   echo "clang not found, skipping"
 fi
