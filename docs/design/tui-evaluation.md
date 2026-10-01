@@ -130,4 +130,9 @@ internal/ui/
 | state 位于 `~/.config/protector/state.json` | `os.UserConfigDir()/protector/state.json`（macOS 下为 `~/Library/Application Support`） | 遵循平台惯例 |
 | S4 的 git work tree 检查 | 实现为**警告级**（可继续执行） | 不少合法工作流就在仓库内出包 |
 
-**尚未实现**：S5 完成后一键复制命令行、配置 diff 视图（当前为整份 JSON 预览）。
+**尚未实现**：配置 diff 视图（当前为整份 JSON 预览）。
+
+> **2026-10 补记**：S5 的"一键复制命令行"已实现——完成页渲染等价 headless
+> 命令（`Form.HeadlessCommand`：非默认项才输出、路径加引号、密钥只出现 env
+> 名），按 `c` 经 OSC52 转义序列直接写入终端剪贴板（不支持 OSC52 的终端
+> 静默忽略，命令文本仍可手动选择复制）。

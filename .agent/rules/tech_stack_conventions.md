@@ -113,12 +113,36 @@ if err := pipeline.Run(module); err != nil {
 - zipalign: `~/Library/Android/sdk/build-tools/<version>/zipalign`
 - apksigner: `~/Library/Android/sdk/build-tools/<version>/apksigner`
 
-### 调用模式
+### 调用模式（CommandRunner 抽象）
+
+外部工具调用一律经 `internal/app/runner.go` 的 `CommandRunner` 接口
+（`Tool.Runner` 注入，默认 `realRunner{}`，测试用 fake——见
+`.agent/workflows/testing_strategy.md`）：
+
 ```go
-func runCommand(ctx context.Context, bin string, args []string, env map[string]string, timeout time.Duration) error
+type CommandRunner interface {
+    Run(ctx context.Context, bin string, args []string, env map[string]string,
+        timeout time.Duration, stdout, stderr io.Writer) error
+    Output(bin string, args []string) ([]byte, error)
+    LookPath(bin string) (string, error)
+}
 ```
 
-所有外部工具调用都通过统一的 `runCommand` 封装，支持：
-- Context 取消
-- 超时控制
-- 环境变量注入
+支持 Context 取消、超时控制、环境变量注入、stdout/stderr 注入（TUI 场景
+收集子进程输出而不撕裂画面）。
+
+## Charm 栈（protector ui TUI）
+
+| 库 | 锁定 | 用途 |
+|----|------|------|
+| `github.com/charmbracelet/bubbletea` | v1 稳定线 | Elm 架构状态机（`internal/ui/model.go`） |
+| `github.com/charmbracelet/bubbles` | v1 | textinput / spinner |
+| `github.com/charmbracelet/lipgloss` | v1 | 样式（view.go 顶部集中定义） |
+
+约定：
+- **纯逻辑与终端分离**：表单字段/校验/配置生成在 `form.go`（无 bubbletea
+  import，表驱动可测）；渲染与按键只在 `model.go`/`view.go`
+- 密钥字段只接受**环境变量名**，写盘配置保留 `${VAR}` 引用、绝不落明文
+- 非 TTY 环境以退出码 2 降级并提示改用 `-profile`
+- TUI 中展示的等价 headless 命令用 `Form.HeadlessCommand` 生成（密钥只出
+  env 名），剪贴板复制走 OSC52 转义序列

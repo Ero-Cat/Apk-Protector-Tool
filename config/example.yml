@@ -33,7 +33,11 @@ vmp:
     function_vm: {}
     sensitive_list: []
     critical_list: []
-  static_key: ${GOPROTECT_STATIC_KEY}
+  # 字节码 XOR 加密的静态密钥片段。留空（或删除本行）= 0x5A，与 C 运行时
+  # 缺省一致（推荐）。显式设置时，应用侧必须在启动早期调用
+  # goprotect_set_static_key(<值的末字节>) 注册同一值，否则字节码无法解密
+  # ——契约详见 docs/goprotect.md「主要能力」。
+  static_key: ""
   runtime_key_hint: ${GOPROTECT_RUNTIME_KEY_HINT}
 
 report:
