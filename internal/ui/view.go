@@ -210,7 +210,15 @@ func (m model) viewRun() string {
 	if m.form != nil && m.form.Values[keyReport] != "" {
 		b.WriteString(stLabel.Render("Report:    ") + m.form.Values[keyReport] + "\n")
 	}
-	b.WriteString("\n" + footer("q quit"))
+	if m.form != nil {
+		cmd := m.form.HeadlessCommand("protector")
+		b.WriteString("\n" + stLabel.Render("Replay in CI (headless):") + "\n")
+		b.WriteString(stBox.Render(stJSON.Render(cmd)) + "\n")
+		if m.copied {
+			b.WriteString(stOK.Render("✓ copied to clipboard (OSC52)") + "\n")
+		}
+	}
+	b.WriteString("\n" + footer("c copy command · q quit"))
 	return b.String()
 }
 

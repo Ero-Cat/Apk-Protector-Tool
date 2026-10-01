@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -128,6 +129,7 @@ type model struct {
 	runErr    error
 	runOutput string
 	finished  bool
+	copied    bool // headless 命令已通过 OSC52 发往剪贴板
 }
 
 func newModel() model {
@@ -348,8 +350,21 @@ func (m model) updateRunKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenForm
 			return m, m.focusCmd()
 		}
+	case "c":
+		// 一键复制等价 headless 命令：经 OSC52 转义序列写入终端剪贴板，
+		// 不支持的终端会静默忽略（命令本身也渲染在完成页可手动选择）。
+		if m.finished && m.runErr == nil && m.form != nil {
+			m.copied = true
+			return m, tea.Printf("%s", osc52Copy(m.form.HeadlessCommand("protector")))
+		}
 	}
 	return m, nil
+}
+
+// osc52Copy renders the OSC52 "copy to clipboard" escape sequence (base64
+// payload). Terminals without OSC52 support simply consume and ignore it.
+func osc52Copy(s string) string {
+	return "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(s)) + "\x07"
 }
 
 func (m model) handleRunEvent(ev runEvent) (tea.Model, tea.Cmd) {

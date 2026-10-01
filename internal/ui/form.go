@@ -284,6 +284,63 @@ func (f *Form) PreviewJSON() (string, error) {
 	return string(data), nil
 }
 
+// HeadlessCommand renders the equivalent non-interactive invocation for the
+// current form state — shown on the S5 completion screen so a verified wizard
+// run can be replayed in CI without reconstructing flags by hand. Only
+// non-empty options are emitted, and secrets appear exclusively as env-var
+// NAME references (-store-pass-env style flags).
+func (f *Form) HeadlessCommand(bin string) string {
+	if strings.TrimSpace(bin) == "" {
+		bin = "protector"
+	}
+	args := []string{bin, "run", "-profile", string(f.Profile), "-input", shellQuote(f.InputAPK)}
+	add := func(flag, value string) {
+		if strings.TrimSpace(value) != "" {
+			args = append(args, flag, shellQuote(strings.TrimSpace(value)))
+		}
+	}
+
+	add("-output", f.Values[keyOutput])
+	add("-zipalign", f.Values[keyZipalign])
+	add("-apksigner", f.Values[keyApksigner])
+	add("-keytool", f.Values[keyKeytool])
+	add("-keystore", f.Values[keyKeystore])
+	if f.Toggles[keyCreateKS] {
+		args = append(args, "-create-keystore")
+	}
+	add("-key-alias", f.Values[keyAlias])
+	add("-store-pass-env", f.Values[keyStorePassEnv])
+	add("-key-pass-env", f.Values[keyKeyPassEnv])
+	add("-report", f.Values[keyReport])
+
+	if f.Profile == presets.Full {
+		add("-protect-secret-env", f.Values[keySecretEnv])
+		add("-protect-package-prefix", f.Values[keyPrefix])
+		if f.Toggles[keyMultiDex] {
+			args = append(args, "-protect-multi-dex")
+		}
+		if f.Toggles[keyCompress] {
+			args = append(args, "-protect-compress")
+		}
+		if f.Toggles[keyRandomPkg] {
+			args = append(args, "-protect-random-package")
+		}
+		if f.Toggles[keyPseudo] {
+			args = append(args, "-protect-pseudo")
+		}
+	}
+	return strings.Join(args, " ")
+}
+
+// shellQuote wraps values containing whitespace in single quotes so the
+// rendered command stays copy-pasteable.
+func shellQuote(v string) string {
+	if !strings.ContainsAny(v, " \t'\"") {
+		return v
+	}
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+}
+
 // CheckStatus classifies a review check line.
 type CheckStatus int
 

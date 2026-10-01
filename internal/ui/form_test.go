@@ -180,3 +180,54 @@ func TestDefaultOutputPath(t *testing.T) {
 		t.Fatalf("DefaultOutputPath = %q, want %q", got, want)
 	}
 }
+
+func TestHeadlessCommand(t *testing.T) {
+	t.Run("full profile defaults carry toggles", func(t *testing.T) {
+		f := NewForm(presets.Full, "app-release.apk")
+		f.Values[keySecretEnv] = "APK_PROTECT_SECRET"
+		f.Values[keyStorePassEnv] = "APK_STORE_PASS"
+		f.Values[keyAlias] = "release"
+		f.Values[keyKeystore] = "sign/release.keystore"
+
+		got := f.HeadlessCommand("")
+		for _, want := range []string{
+			"protector run -profile full -input app-release.apk",
+			"-keystore sign/release.keystore",
+			"-key-alias release",
+			"-store-pass-env APK_STORE_PASS",
+			"-protect-secret-env APK_PROTECT_SECRET",
+			"-protect-multi-dex", "-protect-compress",
+			"-protect-random-package", "-protect-pseudo",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("command missing %q:\n%s", want, got)
+			}
+		}
+		// 密钥绝不以值形态出现，只允许 env 名。
+		if strings.Contains(got, "store-secret") {
+			t.Errorf("command leaks secret values: %s", got)
+		}
+	})
+
+	t.Run("empty optional fields are omitted", func(t *testing.T) {
+		f := NewForm(presets.Quick, "app.apk")
+		got := f.HeadlessCommand("protector")
+		for _, banned := range []string{"-output", "-zipalign", "-apksigner", "-keytool", "-report", "-protect-"} {
+			if strings.Contains(got, banned) {
+				t.Errorf("minimal command should omit %q: %s", banned, got)
+			}
+		}
+	})
+
+	t.Run("paths with spaces are quoted", func(t *testing.T) {
+		f := NewForm(presets.SignOnly, "my app.apk")
+		f.Values[keyKeystore] = "/tmp/My Keys/release.keystore"
+		got := f.HeadlessCommand("protector")
+		if !strings.Contains(got, "-input 'my app.apk'") {
+			t.Errorf("input not quoted: %s", got)
+		}
+		if !strings.Contains(got, `'/tmp/My Keys/release.keystore'`) {
+			t.Errorf("keystore not quoted: %s", got)
+		}
+	})
+}
