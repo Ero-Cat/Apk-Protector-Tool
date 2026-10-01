@@ -97,13 +97,13 @@ jobs:
 
       - name: Build llvmwrap with -tags llvm
         run: |
-          PC_DIR=$(dirname "$(find /usr/lib/llvm-* -name llvm.pc | head -1)")
+          PC_DIR=$(bash scripts/ci-llvm-pkgconfig.sh)
           echo "using pkgconfig dir: $PC_DIR"
           PKG_CONFIG_PATH="$PC_DIR" CGO_ENABLED=1 go build -tags llvm ./llvmwrap/ ./cmd/goprotect
 
       - name: LLVM-tagged integration tests (P4.2)
         run: |
-          PC_DIR=$(dirname "$(find /usr/lib/llvm-* -name llvm.pc | head -1)")
+          PC_DIR=$(bash scripts/ci-llvm-pkgconfig.sh)
           # Runtime object so lli can resolve VM entry/hook symbols in
           # post-pipeline semantic runs.
           clang -std=c11 -O1 -I runtime/include -c runtime/src/vm_entry.c -o /tmp/gp_vm_entry.o
@@ -123,7 +123,7 @@ jobs:
 
       - name: Validate dump-cfg DOT output renders (P2.4)
         run: |
-          PC_DIR=$(dirname "$(find /usr/lib/llvm-* -name llvm.pc | head -1)")
+          PC_DIR=$(bash scripts/ci-llvm-pkgconfig.sh)
           mkdir -p /tmp/dotcheck && cp passes/testdata/branchy.ll /tmp/dotcheck/
           PKG_CONFIG_PATH="$PC_DIR" CGO_ENABLED=1 \
             go build -tags llvm -o /tmp/goprotect ./cmd/goprotect
