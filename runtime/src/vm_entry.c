@@ -290,9 +290,13 @@ static void vm_execute(vm_context_t* ctx) {
             VM_POP(ctx);
             break;
 
-        case OP_DUP:
-            VM_PUSH(ctx, VM_PEEK(ctx));
+        case OP_DUP: {
+            /* 先取值再压栈：VM_PEEK 与 VM_PUSH 都会读写 sp，嵌套在同一个
+             * 表达式里没有序列点（UB，GCC -Wsequence-point 报警）。 */
+            int32_t top = VM_PEEK(ctx);
+            VM_PUSH(ctx, top);
             break;
+        }
 
         case OP_ADD:
             b = VM_POP(ctx);
