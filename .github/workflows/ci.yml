@@ -71,11 +71,45 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install LLVM dev
-        run: sudo apt-get update && sudo apt-get install -y llvm-18-dev
+      - name: Install LLVM dev + runtime
+        run: sudo apt-get update && sudo apt-get install -y llvm-18-dev llvm-18-runtime graphviz
 
       - name: Build llvmwrap with -tags llvm
         run: |
           PC_DIR=$(dirname "$(find /usr/lib/llvm-* -name llvm.pc | head -1)")
           echo "using pkgconfig dir: $PC_DIR"
           PKG_CONFIG_PATH="$PC_DIR" CGO_ENABLED=1 go build -tags llvm ./llvmwrap/ ./cmd/goprotect
+
+      - name: LLVM-tagged integration tests (P4.2)
+        run: |
+          PC_DIR=$(dirname "$(find /usr/lib/llvm-* -name llvm.pc | head -1)")
+          # Runtime object so lli can resolve VM entry/hook symbols in
+          # post-pipeline semantic runs.
+          clang -std=c11 -O1 -I runtime/include -c runtime/src/vm_entry.c -o /tmp/gp_vm_entry.o
+          for f in hooks integrity antidebug; do
+            clang -std=c11 -O1 -I runtime/include -c "runtime/src/$f.c" -o "/tmp/gp_$f.o"
+          done
+          ld -r /tmp/gp_vm_entry.o /tmp/gp_hooks.o /tmp/gp_integrity.o /tmp/gp_antidebug.o -o /tmp/goprotect_runtime.o
+          # lli from llvm-18-runtime is suffixed; expose it under the plain name.
+          LLI_BIN=$(command -v lli || command -v lli-18 || true)
+          if [ -n "$LLI_BIN" ] && [ "$(basename "$LLI_BIN")" != "lli" ]; then
+            sudo ln -sf "$LLI_BIN" /usr/local/bin/lli
+          fi
+          PATH="$PATH:/usr/lib/llvm-18/bin" \
+            GOPROTECT_TEST_RUNTIME_OBJ=/tmp/goprotect_runtime.o \
+            PKG_CONFIG_PATH="$PC_DIR" CGO_ENABLED=1 \
+            go test -tags llvm ./llvmwrap/... ./passes/...
+
+      - name: Validate dump-cfg DOT output renders (P2.4)
+        run: |
+          PC_DIR=$(dirname "$(find /usr/lib/llvm-* -name llvm.pc | head -1)")
+          mkdir -p /tmp/dotcheck && cp passes/testdata/branchy.ll /tmp/dotcheck/
+          PKG_CONFIG_PATH="$PC_DIR" CGO_ENABLED=1 \
+            go build -tags llvm -o /tmp/goprotect ./cmd/goprotect
+          /tmp/goprotect -input /tmp/dotcheck/branchy.ll -dump-cfg \
+            -o /tmp/dotcheck/out.bc > /dev/null
+          for f in /tmp/dotcheck/dump-cfg-before.dot /tmp/dotcheck/dump-cfg-after.dot; do
+            dot -Tsvg "$f" -o "$f.svg"
+            test -s "$f.svg"
+          done
+          echo "DOT graphs rendered OK"

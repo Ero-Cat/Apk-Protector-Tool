@@ -9,12 +9,14 @@ package llvmwrap
 #include <llvm-c/BitReader.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Analysis.h>
+#include <llvm-c/IRReader.h>
 #include <stdlib.h>
 #include <string.h>
 */
 import "C"
 import (
 	"errors"
+	"strings"
 	"unsafe"
 )
 
@@ -40,9 +42,18 @@ func parseBitcodeImpl(path string) (*Module, error) {
 		defer C.LLVMDisposeMessage(msg)
 		return nil, errors.New(C.GoString(msg))
 	}
-	defer C.LLVMDisposeMemoryBuffer(buf)
 
 	var mod C.LLVMModuleRef
+	if strings.HasSuffix(path, ".ll") {
+		// LLVMParseIRInContext takes ownership of the memory buffer on both
+		// success and failure, so it must not be disposed on this path.
+		if C.LLVMParseIRInContext(C.LLVMGetGlobalContext(), buf, &mod, &msg) != 0 {
+			defer C.LLVMDisposeMessage(msg)
+			return nil, errors.New(C.GoString(msg))
+		}
+		return &Module{impl: moduleImpl{ref: mod}}, nil
+	}
+	defer C.LLVMDisposeMemoryBuffer(buf)
 	if C.LLVMParseBitcode2(buf, &mod) != 0 {
 		return nil, errors.New("failed to parse bitcode")
 	}
@@ -140,6 +151,25 @@ func (bb basicBlockImpl) instructions() []Instruction {
 
 func (bb basicBlockImpl) moveBefore(target BasicBlock) {
 	C.LLVMMoveBasicBlockBefore(bb.ref, target.impl.ref)
+}
+
+// successors walks the terminator's successor list, which covers br, condbr
+// and switch uniformly. The C API exposes successor accessors on the
+// terminator value, not on the block ref.
+func (bb basicBlockImpl) successors() []BasicBlock {
+	term := C.LLVMGetBasicBlockTerminator(bb.ref)
+	if term == nil {
+		return nil
+	}
+	n := int(C.LLVMGetNumSuccessors(term))
+	out := make([]BasicBlock, 0, n)
+	for i := 0; i < n; i++ {
+		succ := C.LLVMGetSuccessor(term, C.uint(i))
+		if succ != nil {
+			out = append(out, BasicBlock{impl: basicBlockImpl{ref: succ}})
+		}
+	}
+	return out
 }
 
 func (bb basicBlockImpl) name() string {

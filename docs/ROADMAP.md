@@ -10,9 +10,9 @@
 |------|------|--------|-----------|------|
 | [P0](#p0-加固-ux-与配置安全) | 加固 UX 与配置安全（protector） | 5 | M | ✅ 全部完成 |
 | [P1](#p1-vmp-端到端打通) | VMP 端到端 | 8 | L | ✅ 全部完成；真实 LLVM 链路已验证（lli 语义正确 + 真实 C 运行时执行） |
-| [P2](#p2-pass-正确性) | Pass 正确性 | 6 | M–L | 🟢 P2.1 已完成；其余进行中 |
-| [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 | M | ⏳ 骨架就绪 |
-| [P4](#p4-测试基建) | 测试基建 | 2 | M | ⏳ 策略已定未落地 |
+| [P2](#p2-pass-正确性) | Pass 正确性 | 6 主条目 / 20 子项 | M–L | 🟢 P2.1、P2.6 完成；P2.2–P2.5 已细颗粒拆分推进中 |
+| [P3](#p3-android-运行时完善) | Android 运行时完善 | 3 主条目 / 11 子项 | M–L | ⏳ 已细颗粒拆分；host 可验证部分推进中 |
+| [P4](#p4-测试基建) | 测试基建 | 2 主条目 / 7 子项 | M | ⏳ 已细颗粒拆分 |
 
 建议顺序：**P0.3 / P0.5（安全修复，小改动大收益）→ P0.1 / P0.2（TUI 与 CLI 重构）→ P1 → P2 → P3 → P4 穿插进行**。
 
@@ -176,88 +176,114 @@
 - **任务拆解**：llvmwrap 补终结器读取/删除 API；cf_flatten 重写主循环；pass 结束统一 `LLVMVerifyModule`（联动 P4.2）。
 - **验收标准**：对含循环+多分支的 `.ll` 输入，pass 后模块通过 verifier 且语义等价（可用 lli 执行对比）。
 
-### P2.2 const_obf 真实字面量重写 🟡 部分完成
+### P2.2 const_obf 真实字面量重写 🟡 细颗粒推进中
 
-> **落地情况**：xor 恒等包裹已修复为"整型操作数 + SetOperand"（原实现包裹指针值产出非法 IR，且 ReplaceAllUsesWith 会形成自引用环）；入口解密存根调用保留。字面量枚举与加密改写仍待做。
+> **已落地**：xor 恒等包裹修复为"整型操作数 + SetOperand"（原实现包裹指针值产出非法 IR，且 ReplaceAllUsesWith 形成自引用环）；入口解密存根调用保留。
+> **拆分原则**：值改写（整数常量）与数据改写（字符串全局）解耦，各自独立可验收；C 侧解密与 Go 侧加密用共享向量锚定。
 
-- **现状**：`passes/const_obf.go:11` 注释自认"完整方案应遍历并重写字面量，这里先在入口调用解密存根"——仅插入调用，未动任何常量。
-- **目标**：枚举函数内整数常量，替换为运行时解密表达式；配合 P1.7 的解密实现。
-- **任务拆解**：llvmwrap 补常量遍历/替换 API；按 `substitute_intensity` 比例抽样改写；保留原值可恢复语义（xor/加法拆分）。
-- **验收标准**：改写后函数经 verifier 通过，lli 执行结果与原函数一致。
+- **P2.2.1 llvmwrap 常量与使用者 API** ⏳
+  - 现状：llvmwrap 无全局枚举、无使用者遍历、无私有字符串读取——字面量改写无构件。
+  - 任务：`Module.Globals()`（GetFirstGlobal/GetNextGlobal）、`Value.Users()`（GetFirstUse/GetNextUse/GetUser）、私有 const i8 数组读取（IsAConstantDataArray + GetAsString，失败即跳过）、可写全局创建（AddGlobal + SetInitializer + SetGlobalConstant(0) + PrivateLinkage）。
+  - 验收：native+mock 双实现编译通过；llvm-tagged 冒烟枚举到夹具中的全局与使用者。
+- **P2.2.2 整数常量按强度全量改写** ⏳
+  - 现状：`passes/const_obf.go` 每函数只包裹**第一个**整型操作数（xor 恒等），覆盖率与强度配置无关。
+  - 任务：遍历全部指令全部操作数，`IsConstInt` 且整型按 `substitute_intensity` 概率抽样；随机选 xor 恒等 `(c^k)^k` 或加法拆分 `(c−k)+k`（泛化 wrapIntegerOperand，SetOperand 替换）。
+  - 验收：改写后 verifier 通过、lli 结果与原函数一致；强度=0 零改写、强度=10 高比例改写（IR 断言）。
+- **P2.2.3 私有字符串全局加密** ⏳
+  - 现状：字符串字面量原样留在 .rodata，`strings` 一把抓。
+  - 任务：仅重写"私有 const i8 数组全局且所有使用者均为指令"（有常量表达式/GEP 嵌套使用者则整组跳过），排除 `__gp_*`/`__goprotect_*` 前缀；新可写全局存 XOR 密文并替换指令使用者；生成 `__gp_str_regions` 常量表 `{i8* data, i32 len, i8 key}[]` 与计数全局。
+  - 验收：输出 IR 中原明文串不再出现；lli 输出仍为原文。
+- **P2.2.4 C 侧解密真实现** ⏳
+  - 现状：`runtime/src/hooks.c` 的 `__goprotect_decrypt_strings` 是显式 no-op 存根。
+  - 任务：静态一次性守卫 + 遍历 `__gp_str_regions` 原位 XOR 解密；goprotect.h 补区域结构 extern 声明。
+  - 验收：C 单测解密往返，与 Go 侧加密互为逆操作。
+- **P2.2.5 测试锚定** ⏳：llvm-tagged（verifier + lli 语义 + 明文消失断言）+ runtime/tests 解密单测；两侧 CI 双绿。
 
-### P2.3 virtualize 支持非 void 函数
+### P2.3 virtualize 完整虚拟化（非 void + 参数 + 旧体擦除）⏳
 
-- **现状**：`passes/virtualize.go:59` 注释"Only handle void functions for now"；且旧函数体未移除，只是前面加了个入口块——体积与信息泄露双输。
-- **目标**：支持带返回值函数（返回值经 VM 栈回传）；原函数体替换为对 VM 入口的调用桩。
-- **任务拆解**：VM 指令集补 `OP_RET_VALUE`；编译器处理 ret；调用桩生成。
-- **验收标准**：`virtualize_ratio` 覆盖到非 void 函数，模块 verify 通过。
+> 现状：`passes/virtualize.go` 仅接纳"void 返回 + 零参数引用 + 纯整型算术"函数；旧函数体原样保留（体积与信息泄露双输）；入口符号按 VM 名铸造而 C 侧只有 vm_a/vm_b 两个硬编码实现（自定义 VM 名静默链接失败）。
 
-### P2.4 `--dump-cfg` DOT 导出
+- **P2.3.1 ISA 扩展 OP_RET_VALUE** ⏳：Go opcodes.go、C kOpcodeTable + 解释器 case、一致性测试三处同步。
+- **P2.3.2 llvmwrap 缺失 API** ⏳：`Function.ParamCount()/Param(i)`、`Builder.CreateRet(v)`、`BasicBlock.Delete()`（native+mock+facade）。
+- **P2.3.3 编译器参数模型** ⏳：Compile 预扫描填 `params[RefID]→槽`；`pushValue` 命中参数引用 → `OP_PUSH_ARG`；元数据 `param_count` 真实化（当前恒 0）。
+- **P2.3.4 ret 带值编译** ⏳：`ret v` → pop + `OP_RET_VALUE`；资格收紧：参数全 i32 且 ≤4 个、返回 i32 或 void（i64 等截断风险类型保守跳过）。
+- **P2.3.5 入口 ABI v2（统一符号）** ⏳：统一为 `__goprotect_vm_entry_encrypted(i8*, i8*, i32×4) → i32`；vm_a/vm_b 保留同签名别名；C 侧把 a0..a3 播种进 locals；消除自定义 VM 名链接陷阱。
+- **P2.3.6 旧函数体擦除** ⏳：逆序（块逆序 × 块内指令逆序；phi 已排除保证支配序安全）erase 指令再删空块；新体 = 调用入口 + ret。
+- **P2.3.7 测试锚定** ⏳：test_vm.c 增 retval/args 用例；llvm-tagged 断言非 void 虚拟化后 IR 无原指令且 lli 语义正确。
+- **验收标准（整条）**：`virtualize_ratio` 覆盖非 void 函数；模块 verify 通过；产物不含原函数体；lli 语义与原函数一致。
 
-- **现状**：flag 解析了（`cmd/goprotect/main.go:40`）、配置字段存在（`config/config.go:44`）、文档标注"预留开关，目前存根"（`docs/goprotect.md:18`）——**没有任何消费代码**。
-- **目标**：pass 前后各导出 `dump-cfg-before.dot` / `dump-cfg-after.dot`。
-- **任务拆解**：llvmwrap 补基本块/后继遍历 API；DOT 生成器（纯字符串拼接即可）；`debug.dump_cfg` 接线。
-- **验收标准**：`graphviz` 渲染输出无报错，before/after 差异肉眼可见（平坦化效果可视化）。
+### P2.4 `--dump-cfg` DOT 导出 ✅ 已实现
 
-### P2.5 `.ll` 文本输入支持
+> **落地情况**：llvmwrap 新增 `BasicBlock.Successors()`（经终结器 Value 调 LLVMGetNumSuccessors/GetSuccessor，对 br/condbr/switch 通用）；`passes/dot.go` 生成 per-function cluster、入口高亮、终结器 opcode 标注的 DOT；`pipeline.Run` 在 `debug.dump_cfg` 时把 `dump-cfg-before/after.dot` 写到输出目录；CI llvm job 用 graphviz `dot -Tsvg` 双文件渲染校验。
 
-- **现状**：`-input` 帮助文案宣称接受 `.bc`/`.ll`，但 `llvmwrap/native.go` 只有 `LLVMParseBitcode2`——`.ll` 实际不可用。
-- **目标**：按扩展名分发，`.ll` 走 `LLVMParseIRInContext`。
-- **任务拆解**：native.go 补文本解析；goprotect 入口按扩展名选择。
-- **验收标准**：对同一模块的 `.bc` 与 `.ll` 两种输入，pass 输出等价。
+- **P2.4.1 Successors API** ✅
+- **P2.4.2 DOT 生成器** ✅（`passes/dot.go`，另有 mock 兼容单测）
+- **P2.4.3 管线接线** ✅（`pipeline.Run` 前后写文件，输出目录跟随 cfg.Output）
+- **P2.4.4 渲染验证** ✅（CI graphviz 渲染断言 + llvm-tagged 结构断言）
 
-### P2.6 llvmwrap 空实现补齐
+### P2.5 `.ll` 文本输入支持 ✅ 已实现
 
-- **现状**：`llvmwrap/native.go:128-134` 的 `appendInstructionBefore`（空函数体）与 `terminateWith`（noop 占位）两个方法无实际行为——是 P2.1/P2.2 的前置依赖。
-- **目标**：两个方法对接真实 LLVM C API。
-- **任务拆解**：实现 + 在 `-tags llvm` 构建下冒烟验证。
-- **验收标准**：native 构建下调用两方法后模块 verify 通过。
+> **落地情况**：`parseBitcodeImpl` 按扩展名分发——`.ll` 走 `LLVMParseIRInContext`（接管内存缓冲），`.bc` 走 `LLVMParseBitcode2`；llvm-tagged 测试断言同一模块两种输入渲染一致（归一化 ModuleID 头）；CLI 默认输出统一为 `.bc` 后缀。
+
+- **P2.5.1 文本解析** ✅
+- **P2.5.2 等价性验证** ✅（`TestTextualAndBitcodeInputsEquivalent`）
+- **P2.5.3 文档同步** ⏳（随 P2 全部完成后统一修订 goprotect.md）
+
+### P2.6 llvmwrap 空实现补齐 ✅ 已完成（审计轮）
+
+> **落地情况**：原 `appendInstructionBefore`/`terminateWith` 两个死桩已在审计修复轮删除（零调用方）；P2.1 的真实 cf_flatten 重写用 Builder API 直接构建，不再需要这两个方法。本条目关闭。
 
 ---
 
 ## P3 Android 运行时完善
 
-### P3.1 完整性校验真实化
+### P3.1 完整性校验真实化 ⏳
 
-- **现状**：`runtime/src/integrity.c:29,79`——期望哈希标注"实际应用中应从安全存储加载"，校验循环"实际实现应读取对应内存区域并计算哈希"，实际直接 `verified = 1`。
-- **目标**：对指定内存区域计算哈希并与期望值比对，不匹配走预设响应（退出/擦除）。
-- **任务拆解**：区域→范围表（构建期生成）；哈希算法与期望值存储格式定义；失败策略可配置。
-- **验收标准**：篡改受保护区域后校验返回失败（NDK 交叉编译单测）。
+- **现状**：`runtime/src/integrity.c` 注册时直接 `verified = 1`，从不计算哈希；`g_integrity_failures` 永不增长；全仓无任何 `goprotect_register_region` 调用（pass 产出的检查 id 全部落入 "unknown region" 告警）。
+- **P3.1.1 真哈希与基线复检** ⏳：实现 FNV-1a64；注册时对 `[start, start+len)` 算基线，检查时复检比对。
+- **P3.1.2 失败策略** ⏳：不匹配累计 `g_integrity_failures` 并按策略执行（LOG / EXIT / ZEROIZE，`goprotect_set_integrity_policy` 可配）；未注册 id 一次性告警放行，防 pass 产出 id 误报。
+- **P3.1.3 host 单测** ⏳：`runtime/tests/test_integrity.c`（基线通过 / 篡改检出 / 未知区域放行），接入 CI runtime job 与 e2e。
+- **验收标准**：篡改已注册区域后校验返回失败且计数增长（host 可验证；NDK 交叉编译矩阵列为后续）。
 
-### P3.2 Frida 端口检测
+### P3.2 Frida 端口检测 ⏳
 
-- **现状**：`runtime/src/antidebug.c:85` 注释"省略实现：需要网络 socket 检测"。
-- **目标**：检测本机 27042/27043 等 frida-server 默认端口与 `frida-gadget` 加载痕迹。
-- **任务拆解**：socket 连接探测 + `/proc/self/maps` 扫描；结果并入安全钩子上报通道。
-- **验收标准**：设备上运行 frida-server 时检测函数返回阳性（真机验收）。
+- **现状**：`runtime/src/antidebug.c` 的 check_frida 已有 `/proc/self/maps` 扫描，端口探测注释"省略实现：需要网络 socket 检测"。
+- **P3.2.1 端口探测函数** ⏳：跨平台 `goprotect_probe_port()`（非阻塞 connect + 150ms poll/select）。
+- **P3.2.2 并入 check_frida** ⏳：探测 27042/27043 并入现有检测结果通道。
+- **P3.2.3 host 单测** ⏳：`runtime/tests/test_antidebug.c`（临时监听端口→阳性；关闭后→阴性）。
+- **验收标准**：host 单测双向验证；真机 frida-server 阳性为文档化手动验收步骤。
 
-### P3.3 DEX 加载/解密运行时 + 密钥存储重设计 🔴 安全
+### P3.3 DEX 密钥外置 + NDK 加载器 demo 🔴 安全 ⏳
 
-- **现状**：`internal/app/protections.go:96,451` 把加密密钥 base64 写进 APK 内的 `assets/protector/metadata.json`——**密钥与密文同体**，对抗静态提取无意义；且仓库不含任何 Android 侧 DEX 加载/解密组件，加密后的包开箱跑不起来。
-- **目标**：提供 NDK 示例加载器（native 拿密钥→解密→`InMemoryDexClassLoader`），密钥不再随包明文分发。
-- **任务拆解**：
-  1. 方案决策：密钥改由 NDK 侧编译期注入 + 白盒/混淆，或 JNI 拼装 + 证书绑定（先出 ADR 记录取舍）；
-  2. 实现最小加载器 demo（Application 替换或 attach hook）；
-  3. protector 侧配合：`metadata.json` 拆分为"运行时必需元数据"与"构建期信息"两份。
-- **验收标准**：一个 demo App 经 protector 加密后能在真机启动并正常运行；APK 内不再含可直接使用的密钥材料。
+- **现状**：`internal/app/protections.go` 把 AES 密钥 base64 写进 APK 内 `assets/protector/metadata.json`——密钥与密文同体，对抗静态提取无意义；仓库不含 Android 侧加载/解密组件，加固包开箱跑不起来。
+- **P3.3.0 ADR** ⏳：`docs/design/adr-0001-dex-key-delivery.md` 记录取舍（编译期注入拆分 vs JNI 拼装+签名绑定 vs 白盒密码）。
+- **P3.3.1 metadata 拆分与密钥外置** ⏳：in-APK 元数据只留非机密（算法/nonce/长度/映射）；密钥写 `<final_output>.key`（0600）；保留 legacy 内嵌逃生开关（默认关，文档标注不安全）。
+- **P3.3.2 NDK 加载器 demo** ⏳：`runtime/android/`——mini AES-GCM C 实现（与 Go crypto 向量双锚定）、JNI 解密交付、Java `InMemoryDexClassLoader` 示例；解密核心保持 host 可编译可测。
+- **P3.3.3 host 等价验收** ⏳：e2e 断言加固产物无密钥材料（原文/base64/hex 三态扫描）；C 侧共享 golden 向量解密 Go 密文还原原始 dex 字节。
+- **P3.3.4 真机手动验收** ⏳：demo App 真机启动步骤文档化。
+- **验收标准**：APK 内不再含可直接使用的密钥材料（host 可验证）；真机启动为手动步骤。
 
 ---
 
 ## P4 测试基建
 
-### P4.1 CommandRunner 抽象落地
+### P4.1 CommandRunner 抽象落地 ⏳
 
-- **现状**：`.agent/workflows/testing_strategy.md` 规定"外部二进制经 `CommandRunner` 接口 mock"，但 `internal/app/tool.go` 直接 `exec.Command` 调 zipalign/apksigner/keytool——策略停留在文档，签名/对齐路径零测试。
-- **目标**：外部调用全部经接口注入，CI 无 Android 工具也能测流水线编排逻辑。
-- **任务拆解**：定义 `CommandRunner` 接口；tool.go/scanner.go 改造注入；表驱动测试覆盖"工具缺失/失败/成功"三类路径。
-- **验收标准**：`internal/app` 对 scan→protect→align→sign→report 的编排逻辑获得无外部依赖的测试覆盖。
+- **现状**：`.agent/workflows/testing_strategy.md` 规定"外部二进制经 `CommandRunner` 接口 mock"，但 `internal/app/tool.go` 直接 `exec.Command` 调 zipalign/apksigner/keytool——策略停留在文档，签名/对齐编排路径零测试。
+- **P4.1.1 接口抽象** ⏳：`CommandRunner` 接口（运行 + LookPath），真实实现为默认值，Tool/Scanner 注入。
+- **P4.1.2 编排测试** ⏳：表驱动覆盖"工具缺失/命令失败/成功"三路径 × scan→protect→align→sign→verify→report 的错误信息与报告步骤。
+- **P4.1.3 e2e 保持绿** ⏳：真实二进制路径行为不变。
+- **验收标准**：`internal/app` 编排逻辑获得无外部依赖的测试覆盖。
 
-### P4.2 LLVM 集成测试（`-tags llvm`）
+### P4.2 LLVM 集成测试（`-tags llvm`）✅ 已实现
 
-- **现状**：所有 pass 测试只断言**名称与管线拼装**，从未对真实 IR 验证变换正确性；`llvmwrap/mock.go` 使默认构建下一切返回 `ErrNoLLVM`。
-- **目标**：带 build tag 的集成测试：真实解析 `.ll` → 跑 pass → `LLVMVerifyModule` → 断言结构。
-- **任务拆解**：`passes/*_llvm_test.go`（`//go:build llvm`）；固定小规模 `.ll` 夹具；CI 增加带 LLVM 的可选 job（apt 装 llvm-dev，允许失败标记过渡）。
-- **验收标准**：本地 `go test -tags llvm ./passes/...` 通过，并实际暴露/防住 P2 类正确性回归。
+> **落地情况**：`passes/testdata/` 四个固定夹具（arith/branchy/strings/calltarget，含 void、非 void、phi 循环、switch、字符串全局）；`passes/pipeline_llvm_test.go` + `llvmwrap/native_llvm_test.go` 覆盖：解析/写回/渲染往返、`.bc`/`.ll` 等价（归一化 ModuleID）、逐 pass 结构断言（cf_flatten 调度器 switch）、lli 前后语义等价（exit code 13/20，runtime.o 经 `GOPROTECT_TEST_RUNTIME_OBJ` 注入，缺失即 Skip）；CI llvm job 增装 llvm-18-runtime + graphviz、编译 runtime.o、跑 `go test -tags llvm ./llvmwrap/... ./passes/...` 并校验 DOT 渲染（job 保持 continue-on-error 过渡）。
+
+- **P4.2.1 夹具** ✅
+- **P4.2.2 llvm-tagged 测试** ✅
+- **P4.2.3 CI 接入** ✅
+- **P4.2.4 llvmwrap 冒烟** ✅
+- **验收标准** ✅：本地 `go test -tags llvm ./passes/... ./llvmwrap/...` 通过（LLVM 23 验证）；后续 P2.2/P2.3 的回归断言直接挂在该地基上。
 
 ---
 

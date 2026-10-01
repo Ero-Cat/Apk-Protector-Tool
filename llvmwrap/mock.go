@@ -28,6 +28,7 @@ func (f functionImpl) returnType() ValueType                                 { r
 func (f functionImpl) asValue() valueImpl                                    { return valueImpl{} }
 func (bb basicBlockImpl) instructions() []Instruction                        { return nil }
 func (bb basicBlockImpl) moveBefore(BasicBlock)                              {}
+func (bb basicBlockImpl) successors() []BasicBlock                           { return nil }
 func (bb basicBlockImpl) name() string                                       { return "" }
 func (i instructionImpl) opcode() string                                     { return "" }
 func (i instructionImpl) replaceAllUsesWith(Instruction)                     {}

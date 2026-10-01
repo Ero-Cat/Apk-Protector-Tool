@@ -19,7 +19,8 @@ type Builder struct{ impl builderImpl }
 // 能力探测：是否包含原生 LLVM 绑定。
 func HasNative() bool { return hasNativeImpl() }
 
-// ParseBitcode 从 .bc/.ll 文件读取模块。
+// ParseBitcode reads a module from a .bc bitcode or .ll textual-IR file
+// (dispatched by file extension).
 func ParseBitcode(path string) (*Module, error) { return parseBitcodeImpl(path) }
 
 // WriteBitcode 将模块写回磁盘。
@@ -52,6 +53,9 @@ func (bb *BasicBlock) Name() string                 { return bb.impl.name() }
 // AsValue exposes the basic block as a value so builders and branch-target
 // resolution can treat it uniformly.
 func (bb BasicBlock) AsValue() Value { return bb.impl.asValue() }
+
+// Successors returns the terminator successor blocks (br/condbr/switch).
+func (bb BasicBlock) Successors() []BasicBlock { return bb.impl.successors() }
 
 func (i *Instruction) Opcode() string { return i.impl.opcode() }
 func (i *Instruction) ReplaceAllUsesWith(newInst Instruction) {

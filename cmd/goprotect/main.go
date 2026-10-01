@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 
 	"github.com/Ero-Cat/Apk-Protector-Tool/config"
 	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
@@ -16,7 +17,7 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "", "Path to YAML/JSON config")
-	input := flag.String("input", "", "Input LLVM bitcode (.bc); textual IR (.ll) is not supported yet — compile it with 'clang -emit-llvm -c'")
+	input := flag.String("input", "", "Input LLVM module (.bc bitcode or .ll textual IR)")
 	output := flag.String("o", "", "Output LLVM bitcode (.bc)")
 	level := flag.String("level", "", "Override obfuscation level (low|medium|high)")
 	dumpCFG := flag.Bool("dump-cfg", false, "Dump DOT graphs before/after passes")
@@ -59,8 +60,9 @@ func main() {
 	}
 
 	if cfg.Output == "" {
-		base := filepath.Base(cfg.Input)
-		cfg.Output = filepath.Join(filepath.Dir(cfg.Input), "obf-"+base)
+		// Output is always bitcode, regardless of the input format.
+		base := strings.TrimSuffix(filepath.Base(cfg.Input), filepath.Ext(cfg.Input))
+		cfg.Output = filepath.Join(filepath.Dir(cfg.Input), "obf-"+base+".bc")
 	}
 	if err := mod.WriteBitcode(cfg.Output); err != nil {
 		log.Fatalf("write output: %v", err)

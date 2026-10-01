@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Ero-Cat/Apk-Protector-Tool/config"
@@ -20,11 +21,15 @@ type Pass interface {
 // Pipeline 依次执行一组 Pass。
 type Pipeline struct {
 	passes []Pass
+	cfg    *config.Config
 }
 
 func (p *Pipeline) Run(m *llvmwrap.Module) error {
 	if m == nil {
 		return fmt.Errorf("module is nil")
+	}
+	if p.cfg != nil && p.cfg.Debug.DumpCFG {
+		p.writeDot("dump-cfg-before.dot", m)
 	}
 	for _, pass := range p.passes {
 		if err := pass.Run(m); err != nil {
@@ -39,7 +44,23 @@ func (p *Pipeline) Run(m *llvmwrap.Module) error {
 			return fmt.Errorf("module invalid after pass %s: %w", pass.Name(), err)
 		}
 	}
+	if p.cfg != nil && p.cfg.Debug.DumpCFG {
+		p.writeDot("dump-cfg-after.dot", m)
+	}
 	return nil
+}
+
+// writeDot dumps the module CFG next to the configured output (cwd when no
+// output path is set). Render failures are surfaced, write failures are not
+// fatal — dumping is a debugging aid.
+func (p *Pipeline) writeDot(name string, m *llvmwrap.Module) {
+	dir := "."
+	if p.cfg != nil && p.cfg.Output != "" {
+		if d := filepath.Dir(p.cfg.Output); d != "" {
+			dir = d
+		}
+	}
+	_ = os.WriteFile(filepath.Join(dir, name), []byte(DumpCFGDOT(m)), 0o644)
 }
 
 func shouldRunByRatio(rnd *rand.Rand, ratio int) bool {
@@ -82,5 +103,5 @@ func BuildPipeline(cfg *config.Config, rpt *report.Report) *Pipeline {
 		passes = append(passes, &SecurityHooksPass{Cfg: cfg, Report: rpt})
 	}
 
-	return &Pipeline{passes: passes}
+	return &Pipeline{passes: passes, cfg: cfg}
 }
