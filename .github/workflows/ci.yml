@@ -36,3 +36,46 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+      - name: Basic e2e (protector pipeline without Android tools)
+        run: bash scripts/e2e-basic.sh
+
+  runtime:
+    name: C runtime checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax-check runtime sources (-Wall -Wextra -Werror)
+        run: |
+          for f in runtime/src/*.c; do
+            clang -fsyntax-only -std=c11 -Wall -Wextra -Werror -I runtime/include "$f"
+          done
+
+      - name: VM interpreter unit tests
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror -I runtime/include \
+            runtime/tests/test_vm.c -o /tmp/test_vm && /tmp/test_vm
+
+  llvm:
+    name: LLVM native build (best-effort)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install LLVM dev
+        run: sudo apt-get update && sudo apt-get install -y llvm-18-dev
+
+      - name: Build llvmwrap with -tags llvm
+        run: |
+          PC_DIR=$(dirname "$(find /usr/lib/llvm-* -name llvm.pc | head -1)")
+          echo "using pkgconfig dir: $PC_DIR"
+          PKG_CONFIG_PATH="$PC_DIR" CGO_ENABLED=1 go build -tags llvm ./llvmwrap/ ./cmd/goprotect

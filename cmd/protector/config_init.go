@@ -88,17 +88,20 @@ reporting:
   json: "dist/report.json"
 `
 
-// configInit 实现 `protector config init [-o path]`。
+// configInit 实现 `protector config init [-o path] [-f]`。
 func configInit(args []string) {
 	fs := flag.NewFlagSet("config init", flag.ExitOnError)
 	output := fs.String("o", "protector.config.yml", "Path of the config template to write")
+	force := fs.Bool("f", false, "Overwrite the target file if it exists")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
-	if _, err := os.Stat(*output); err == nil {
-		fmt.Fprintf(os.Stderr, "refusing to overwrite existing %s — pass -o <path> to choose another file\n", *output)
-		os.Exit(1)
+	if !*force {
+		if _, err := os.Stat(*output); err == nil {
+			fmt.Fprintf(os.Stderr, "refusing to overwrite existing %s — pass -f to force or -o <path> to choose another file\n", *output)
+			os.Exit(1)
+		}
 	}
 	if err := os.WriteFile(*output, []byte(configTemplate), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "write %s: %v\n", *output, err)

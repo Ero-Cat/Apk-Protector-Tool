@@ -60,6 +60,12 @@ func (m moduleImpl) writeBitcode(path string) error {
 
 func (m moduleImpl) dispose() { C.LLVMDisposeModule(m.ref) }
 
+func (m moduleImpl) string() string {
+	cstr := C.LLVMPrintModuleToString(m.ref)
+	defer C.LLVMDisposeMessage(cstr)
+	return C.GoString(cstr)
+}
+
 func (m moduleImpl) functions() []Function {
 	out := []Function{}
 	for fn := C.LLVMGetFirstFunction(m.ref); fn != nil; fn = C.LLVMGetNextFunction(fn) {
@@ -109,12 +115,16 @@ func (f functionImpl) typ() ValueType {
 	return ValueType{impl: valueTypeImpl{ref: C.LLVMTypeOf(f.ref)}}
 }
 
+// functionTypeOf returns the FunctionType of a function value. Under opaque
+// pointers (LLVM >= 15) LLVMTypeOf(function) is a plain ptr, and dereferencing
+// its "element type" yields garbage that crashes builders — the C API exposes
+// the real function type via LLVMGlobalGetValueType.
+func functionTypeOf(fn C.LLVMValueRef) C.LLVMTypeRef {
+	return C.LLVMGlobalGetValueType(fn)
+}
+
 func (f functionImpl) returnType() ValueType {
-	fty := C.LLVMTypeOf(f.ref)
-	if C.LLVMGetTypeKind(fty) == C.LLVMPointerTypeKind {
-		fty = C.LLVMGetElementType(fty)
-	}
-	ret := C.LLVMGetReturnType(fty)
+	ret := C.LLVMGetReturnType(functionTypeOf(f.ref))
 	return ValueType{impl: valueTypeImpl{ref: ret}}
 }
 
@@ -144,10 +154,68 @@ func (bb basicBlockImpl) name() string {
 	return C.GoString(C.LLVMGetBasicBlockName(bb.ref))
 }
 
+// opcodeNames maps LLVMOpcode enum values to textual opcode names. The C API
+// has no LLVMGetOpcodeName accessor, so the mapping lives here and must track
+// the LLVMOpcode enum in llvm-c/Core.h (values are stable by contract).
+var opcodeNames = map[C.LLVMOpcode]string{
+	C.LLVMRet:           "ret",
+	C.LLVMUncondBr:      "br",
+	C.LLVMCondBr:        "br",
+	C.LLVMSwitch:        "switch",
+	C.LLVMIndirectBr:    "indirectbr",
+	C.LLVMInvoke:        "invoke",
+	C.LLVMUnreachable:   "unreachable",
+	C.LLVMCallBr:        "callbr",
+	C.LLVMFNeg:          "fneg",
+	C.LLVMCall:          "call",
+	C.LLVMFence:         "fence",
+	C.LLVMICmp:          "icmp",
+	C.LLVMFCmp:          "fcmp",
+	C.LLVMPHI:           "phi",
+	C.LLVMSelect:        "select",
+	C.LLVMFreeze:        "freeze",
+	C.LLVMAlloca:        "alloca",
+	C.LLVMLoad:          "load",
+	C.LLVMStore:         "store",
+	C.LLVMGetElementPtr: "getelementptr",
+	C.LLVMTrunc:         "trunc",
+	C.LLVMZExt:          "zext",
+	C.LLVMSExt:          "sext",
+	C.LLVMFPToUI:        "fptoui",
+	C.LLVMFPToSI:        "fptosi",
+	C.LLVMUIToFP:        "uitofp",
+	C.LLVMSIToFP:        "sitofp",
+	C.LLVMFPTrunc:       "fptrunc",
+	C.LLVMFPExt:         "fpext",
+	C.LLVMPtrToInt:      "ptrtoint",
+	C.LLVMIntToPtr:      "inttoptr",
+	C.LLVMBitCast:       "bitcast",
+	C.LLVMAddrSpaceCast: "addrspacecast",
+	C.LLVMAdd:           "add",
+	C.LLVMFAdd:          "fadd",
+	C.LLVMSub:           "sub",
+	C.LLVMFSub:          "fsub",
+	C.LLVMMul:           "mul",
+	C.LLVMFMul:          "fmul",
+	C.LLVMUDiv:          "udiv",
+	C.LLVMSDiv:          "sdiv",
+	C.LLVMFDiv:          "fdiv",
+	C.LLVMURem:          "urem",
+	C.LLVMSRem:          "srem",
+	C.LLVMFRem:          "frem",
+	C.LLVMShl:           "shl",
+	C.LLVMLShr:          "lshr",
+	C.LLVMAShr:          "ashr",
+	C.LLVMAnd:           "and",
+	C.LLVMOr:            "or",
+	C.LLVMXor:           "xor",
+}
+
 func (i instructionImpl) opcode() string {
-	op := C.LLVMGetInstructionOpcode(i.ref)
-	c := C.LLVMGetOpcodeName(op)
-	return C.GoString(c)
+	if name, ok := opcodeNames[C.LLVMGetInstructionOpcode(i.ref)]; ok {
+		return name
+	}
+	return "unknown"
 }
 
 func (i instructionImpl) replaceAllUsesWith(newInst Instruction) {
@@ -168,6 +236,35 @@ func (i instructionImpl) operands() []Value {
 
 func (i instructionImpl) calledValue() Value {
 	return Value{impl: valueImpl{ref: C.LLVMGetCalledValue(i.ref)}}
+}
+
+func (i instructionImpl) setOperand(idx int, v Value) {
+	C.LLVMSetOperand(i.ref, C.uint(idx), v.impl.ref)
+}
+
+func (i instructionImpl) eraseFromParent() {
+	C.LLVMInstructionEraseFromParent(i.ref)
+}
+
+func (bb basicBlockImpl) terminator() Instruction {
+	return Instruction{impl: instructionImpl{ref: C.LLVMGetBasicBlockTerminator(bb.ref)}}
+}
+
+func (m moduleImpl) verify() error {
+	var msg *C.char
+	// LLVMVerifyModule returns non-zero for invalid modules; the message
+	// pointer must be provided (NULL makes failures indistinguishable).
+	if rc := C.LLVMVerifyModule(m.ref, C.LLVMReturnStatusAction, &msg); rc != 0 {
+		defer C.LLVMDisposeMessage(msg)
+		if msg != nil {
+			return errors.New(C.GoString(msg))
+		}
+		return errors.New("module failed verification")
+	}
+	if msg != nil {
+		C.LLVMDisposeMessage(msg)
+	}
+	return nil
 }
 
 // intPredicateNames maps LLVMIntPredicate values to their textual form.
@@ -222,11 +319,9 @@ func (b builderImpl) createCall(fn Function, args []Value) Instruction {
 	}
 	cname := cstring("")
 	defer C.free(unsafe.Pointer(cname))
-	ftype := C.LLVMTypeOf(fn.impl.ref)
-	if C.LLVMGetTypeKind(ftype) == C.LLVMPointerTypeKind {
-		ftype = C.LLVMGetElementType(ftype)
-	}
-	call := C.LLVMBuildCall2(b.ref, ftype, fn.impl.ref, carg, argc, cname)
+	// Opaque pointers: LLVMTypeOf(fn) is a pointer, not the function type —
+	// see functionTypeOf.
+	call := C.LLVMBuildCall2(b.ref, functionTypeOf(fn.impl.ref), fn.impl.ref, carg, argc, cname)
 	return Instruction{impl: instructionImpl{ref: call}}
 }
 

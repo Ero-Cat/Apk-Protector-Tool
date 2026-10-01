@@ -15,6 +15,8 @@ type valueTypeImpl struct{}
 func hasNativeImpl() bool                                                    { return false }
 func parseBitcodeImpl(string) (*Module, error)                               { return nil, ErrNoLLVM }
 func (m moduleImpl) writeBitcode(string) error                               { return ErrNoLLVM }
+func (m moduleImpl) verify() error                                           { return nil }
+func (m moduleImpl) string() string                                          { return "" }
 func (m moduleImpl) dispose()                                                {}
 func (m moduleImpl) functions() []Function                                   { return nil }
 func (m moduleImpl) addGlobalString(string, []byte) Value                    { return Value{} }
@@ -34,6 +36,9 @@ func (i instructionImpl) replaceAllUsesWith(Instruction)                     {}
 func (i instructionImpl) operands() []Value                                  { return nil }
 func (i instructionImpl) calledValue() Value                                 { return Value{} }
 func (i instructionImpl) icmpPredicate() string                              { return "" }
+func (i instructionImpl) setOperand(int, Value)                              {}
+func (i instructionImpl) eraseFromParent()                                   {}
+func (bb basicBlockImpl) terminator() Instruction                            { return Instruction{} }
 func (bb basicBlockImpl) asValue() Value                                     { return Value{} }
 func newBuilderAtImpl(Instruction) builderImpl                               { return builderImpl{} }
 func newBuilderAtEndImpl(BasicBlock) builderImpl                             { return builderImpl{} }

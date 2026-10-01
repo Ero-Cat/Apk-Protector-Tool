@@ -34,6 +34,9 @@ const (
 	OP_LOAD  Opcode = 0x30 // 从地址加载
 	OP_STORE Opcode = 0x31 // 存储到地址
 
+	// 槽位写回：弹出栈顶写入局部变量槽（SSA 值落地，1 字节槽号）
+	OP_STORE_LOCAL Opcode = 0x32
+
 	// 比较（结果为 0 或 1）
 	OP_CMP_EQ  Opcode = 0x40
 	OP_CMP_NE  Opcode = 0x41
@@ -90,6 +93,8 @@ var BaseOpcodes = map[Opcode]OpcodeInfo{
 
 	OP_LOAD:  {"LOAD", 1, 0},
 	OP_STORE: {"STORE", 1, 0},
+
+	OP_STORE_LOCAL: {"STORE_LOCAL", 2, 1}, // op + 1B slot index
 
 	OP_CMP_EQ:  {"CMP_EQ", 1, 0},
 	OP_CMP_NE:  {"CMP_NE", 1, 0},

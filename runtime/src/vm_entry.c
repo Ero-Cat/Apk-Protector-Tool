@@ -54,6 +54,7 @@
 
 #define OP_LOAD  0x30
 #define OP_STORE 0x31
+#define OP_STORE_LOCAL 0x32
 
 #define OP_CMP_EQ  0x40
 #define OP_CMP_NE  0x41
@@ -101,6 +102,7 @@ static const opcode_entry_t kOpcodeTable[] = {
     {"SHR",        OP_SHR},
     {"LOAD",       OP_LOAD},
     {"STORE",      OP_STORE},
+    {"STORE_LOCAL", OP_STORE_LOCAL},
     {"CMP_EQ",     OP_CMP_EQ},
     {"CMP_NE",     OP_CMP_NE},
     {"CMP_LT",     OP_CMP_LT},
@@ -155,15 +157,12 @@ static const char* json_value_of(const char* json, const char* key) {
     size_t klen = strlen(key);
     const char* p = json;
     while ((p = strstr(p, key)) != NULL) {
-        /* 确认是独立的键名：前引号 + 后引号 */
-        if (p > json && p[-1] == '"' && p[klen] == '"') {
-            const char* v = p + klen + 1;
+        const char* v = p + klen;
+        while (*v == ' ' || *v == '\t') v++;
+        if (*v == ':') {
+            v++;
             while (*v == ' ' || *v == '\t') v++;
-            if (*v == ':') {
-                v++;
-                while (*v == ' ' || *v == '\t') v++;
-                return v;
-            }
+            return v;
         }
         p += klen;
     }
@@ -207,7 +206,10 @@ static void json_build_decode(const char* json, uint8_t* decode) {
         if (*p != ':') break;
         p++;
         while (*p == ' ' || *p == '\t') p++;
-        long randomized = strtol(p, (char**)&p, 10);
+        char* end = NULL;
+        long randomized = strtol(p, &end, 10);
+        if (end == p) break; /* 无进展则终止，防御畸形输入 */
+        p = end;
         for (i = 0; i < kOpcodeCount; i++) {
             if (strcmp(kOpcodeTable[i].name, name) == 0) {
                 decode[(uint8_t)randomized] = kOpcodeTable[i].op;
@@ -261,7 +263,7 @@ static void vm_execute(vm_context_t* ctx) {
     while (!ctx->halted && ctx->ip < ctx->bytecode_len) {
         uint8_t raw = read_u8(ctx);
         uint8_t op = ctx->decode[raw];
-        int32_t a, b, result;
+        int32_t a, b;
 
         switch (op) {
         case OP_PUSH_CONST:
@@ -358,6 +360,12 @@ static void vm_execute(vm_context_t* ctx) {
             a = VM_POP(ctx);
             VM_PUSH(ctx, (uint32_t)a >> b);
             break;
+
+        case OP_STORE_LOCAL: {
+            uint8_t idx = read_u8(ctx);
+            ctx->locals[idx] = VM_POP(ctx);
+            break;
+        }
 
         case OP_LOAD: {
             /* 地址在栈顶：按 4 字节对齐读取 */

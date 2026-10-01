@@ -31,6 +31,10 @@ type Tool struct {
 	// the rendered screen apart.
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// SkipOutput runs the pipeline without producing a final APK artifact
+	// (scan-only mode: the report is the deliverable).
+	SkipOutput bool
 }
 
 // NewTool creates a Tool instance.
@@ -201,7 +205,12 @@ func (t *Tool) Run(ctx context.Context) (*Report, error) {
 		}
 	}
 
+	if t.SkipOutput {
+		// scan-only：报告即交付物，不产出 APK。
+		return report, nil
+	}
 	t.progress("finalize")
+
 	finalOutput := t.cfg.FinalOutput
 	if finalOutput == "" {
 		finalOutput = filepath.Join(cwd, "dist", baseName+"-protected.apk")

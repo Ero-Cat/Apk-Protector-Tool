@@ -28,6 +28,9 @@ type Compiler struct {
 
 	// 基本块标签表：块 Value RefID -> 稳定标签名
 	blockNames map[uintptr]string
+
+	// def-use 槽位表：产生值的指令 RefID -> 结果槽号
+	defSlots map[uintptr]uint8
 }
 
 // NewCompiler 创建新的编译器实例
@@ -47,6 +50,7 @@ func NewCompiler(r *rand.Rand) *Compiler {
 		nextLocal:  0,
 		params:     make(map[int]uint8),
 		blockNames: make(map[uintptr]string),
+		defSlots:   make(map[uintptr]uint8),
 	}
 }
 
@@ -59,7 +63,12 @@ type CompileResult struct {
 	ParamCount int               // 参数数量
 }
 
-// Compile 编译函数为字节码
+// Compile 编译函数为字节码。
+//
+// 值模型：每个产生值的 SSA 指令绑定一个局部槽——操作数按定义指令解析为
+// PUSH_LOCAL（或常量 PUSH_CONST），指令执行后 STORE_LOCAL 写回自己的槽。
+// 访存/调用/phi 等当前不支持的指令直接报错，由上层跳过该函数（保守策略：
+// 要么语义正确地虚拟化，要么明确不虚拟化，绝不产出算错的字节码）。
 func (c *Compiler) Compile(fn llvmwrap.Function) (*CompileResult, error) {
 	// 重置编译状态
 	c.buf = NewBytecodeBuffer(c.mapper)
@@ -72,11 +81,16 @@ func (c *Compiler) Compile(fn llvmwrap.Function) (*CompileResult, error) {
 		return nil, fmt.Errorf("function has no basic blocks")
 	}
 
-	// 第一遍：为所有基本块确定稳定标签名（含匿名块），跳转目标与标签定义
-	// 必须使用同一张表，否则回填永远对不上号。
+	// 第一遍：块标签表（跳转回填目标）+ 指令结果槽位表（def-use 绑定）。
 	c.blockNames = make(map[uintptr]string)
+	c.defSlots = make(map[uintptr]uint8)
 	for i, bb := range blocks {
 		c.blockNames[bb.AsValue().RefID()] = blockLabel(bb, i)
+		for _, inst := range bb.Instructions() {
+			if producesValue(inst.Opcode()) {
+				c.defSlots[inst.AsValue().RefID()] = c.allocLocal()
+			}
+		}
 	}
 
 	// 第二遍：编译指令
@@ -104,6 +118,18 @@ func (c *Compiler) Compile(fn llvmwrap.Function) (*CompileResult, error) {
 	}, nil
 }
 
+// producesValue 报告指令是否产生可绑槽的 SSA 结果。
+func producesValue(opcode string) bool {
+	switch opcode {
+	case "add", "sub", "mul", "sdiv", "udiv", "srem", "urem",
+		"and", "or", "xor", "shl", "lshr", "ashr",
+		"icmp",
+		"trunc", "zext", "sext", "bitcast":
+		return true
+	}
+	return false
+}
+
 // blockLabel returns the label for a basic block: its LLVM name when it has
 // one, otherwise a stable positional name.
 func blockLabel(bb llvmwrap.BasicBlock, index int) string {
@@ -113,83 +139,55 @@ func blockLabel(bb llvmwrap.BasicBlock, index int) string {
 	return fmt.Sprintf("bb%d", index)
 }
 
-// compileInstruction 编译单条 LLVM IR 指令
+// compileInstruction 编译单条 LLVM IR 指令。不支持的指令返回错误，
+// 由上层保守跳过整个函数。
 func (c *Compiler) compileInstruction(inst llvmwrap.Instruction) error {
 	opcode := inst.Opcode()
+	slot := c.defSlots[inst.AsValue().RefID()]
 
 	switch opcode {
-	// 算术运算
-	case "add", "Add":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_ADD)
-
-	case "sub", "Sub":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_SUB)
-
-	case "mul", "Mul":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_MUL)
-
-	case "sdiv", "SDiv", "udiv", "UDiv":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_DIV)
-
-	case "srem", "SRem", "urem", "URem":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_MOD)
-
-	// 位运算
-	case "and", "And":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_AND)
-
-	case "or", "Or":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_OR)
-
-	case "xor", "Xor":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_XOR)
-
-	case "shl", "Shl":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_SHL)
-
-	case "lshr", "LShr", "ashr", "AShr":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_SHR)
+	// 算术与位运算：解析操作数 -> 运算 -> 结果写回槽。
+	case "add", "sub", "mul", "sdiv", "udiv", "srem", "urem",
+		"and", "or", "xor", "shl", "lshr", "ashr":
+		if err := c.pushOperands(inst); err != nil {
+			return err
+		}
+		c.buf.Emit(binaryOpcode(opcode))
+		c.emitStoreLocal(slot)
 
 	// 比较
-	case "icmp", "ICmp":
-		c.compileOperands(inst)
+	case "icmp":
+		if err := c.pushOperands(inst); err != nil {
+			return err
+		}
 		op, err := icmpOpcode(inst.ICmpPredicate())
 		if err != nil {
 			return err
 		}
 		c.buf.Emit(op)
+		c.emitStoreLocal(slot)
 
-	// 内存操作
-	case "load", "Load":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_LOAD)
-
-	case "store", "Store":
-		c.compileOperands(inst)
-		c.buf.Emit(OP_STORE)
+	// 类型转换：值语义不变，等价于把操作数复制进结果槽。
+	case "trunc", "zext", "sext", "bitcast":
+		ops := inst.Operands()
+		if len(ops) != 1 {
+			return fmt.Errorf("cast with %d operands", len(ops))
+		}
+		if err := c.pushValue(ops[0]); err != nil {
+			return err
+		}
+		c.emitStoreLocal(slot)
 
 	// 控制流
-	case "br", "Br":
+	case "br":
 		operands := inst.Operands()
 		if len(operands) == 1 {
-			// 无条件跳转
 			target, err := c.branchTarget(operands[0])
 			if err != nil {
 				return err
 			}
 			c.emitJump(OP_JMP, target)
 		} else if len(operands) >= 3 {
-			// 条件跳转：真分支 JNZ + 假分支 JMP，两个目标都回填真实标签。
 			cond, tTarget, fTarget := operands[0], operands[1], operands[2]
 			tName, err := c.branchTarget(tTarget)
 			if err != nil {
@@ -199,62 +197,88 @@ func (c *Compiler) compileInstruction(inst llvmwrap.Instruction) error {
 			if err != nil {
 				return err
 			}
-			c.compileValue(cond)
+			if err := c.pushValue(cond); err != nil {
+				return err
+			}
 			c.emitJump(OP_JNZ, tName)
 			c.emitJump(OP_JMP, fName)
+		} else {
+			return fmt.Errorf("br with %d operands", len(operands))
 		}
 
-	case "ret", "Ret":
+	case "ret":
+		if len(inst.Operands()) != 0 {
+			return fmt.Errorf("non-void ret not supported")
+		}
 		c.buf.Emit(OP_RET)
 
-	// 函数调用
-	case "call", "Call":
-		operands := inst.Operands()
-		if len(operands) > 0 {
-			// 被调符号名：优先 CalledValue，回退首个操作数（call 的 operand 0 是被调函数值）。
-			fnName := inst.CalledValue().Name()
-			if fnName == "" {
-				fnName = operands[0].Name()
-			}
-			if fnName == "" {
-				return fmt.Errorf("call: cannot resolve callee symbol")
-			}
-			// 压入参数（跳过 operand 0 的被调函数值）
-			for i := len(operands) - 1; i >= 1; i-- {
-				c.compileValue(operands[i])
-			}
-			fnID := c.getOrAllocExtFunc(fnName)
-			c.buf.Emit(OP_CALL_EXT)
-			c.buf.EmitU16(fnID)
-			c.buf.EmitU8(uint8(len(operands) - 1))
-		}
-
-	// 类型转换等（生成 NOP）
-	case "bitcast", "BitCast", "trunc", "Trunc", "zext", "ZExt", "sext", "SExt":
-		// 类型转换在 VM 中可能不需要显式处理
-		c.buf.Emit(OP_NOP)
-
-	// alloca（分配局部变量槽）
-	case "alloca", "Alloca":
-		// 分配槽位但不生成指令
-		c.allocLocal()
-
-	// 其他指令：生成 NOP
 	default:
-		if !strings.HasPrefix(opcode, "llvm.") {
-			// 未知指令，生成 NOP
-			c.buf.Emit(OP_NOP)
+		if strings.HasPrefix(opcode, "llvm.") {
+			return nil // intrinsic 调用：跳过
 		}
+		// load/store/alloca/call/phi/select/…：值模型或 ABI 尚未支持。
+		return fmt.Errorf("unsupported instruction %q (skipping function)", opcode)
 	}
 
 	return nil
 }
 
-// compileOperands 编译指令的所有操作数
-func (c *Compiler) compileOperands(inst llvmwrap.Instruction) {
-	for _, op := range inst.Operands() {
-		c.compileValue(op)
+// binaryOpcode 把 LLVM 二元运算映射到 VM 指令。
+func binaryOpcode(opcode string) Opcode {
+	switch opcode {
+	case "add":
+		return OP_ADD
+	case "sub":
+		return OP_SUB
+	case "mul":
+		return OP_MUL
+	case "sdiv", "udiv":
+		return OP_DIV
+	case "srem", "urem":
+		return OP_MOD
+	case "and":
+		return OP_AND
+	case "or":
+		return OP_OR
+	case "xor":
+		return OP_XOR
+	case "shl":
+		return OP_SHL
+	default: // lshr, ashr
+		return OP_SHR
 	}
+}
+
+// pushOperands 依次压入指令的全部操作数。
+func (c *Compiler) pushOperands(inst llvmwrap.Instruction) error {
+	for _, op := range inst.Operands() {
+		if err := c.pushValue(op); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pushValue 把一个 LLVM 值压栈：常量取立即数，SSA 值取其定义槽，
+// 其他（函数参数/全局）在当前 ABI 下不支持。
+func (c *Compiler) pushValue(v llvmwrap.Value) error {
+	if isConst, val := v.IsConstInt(); isConst {
+		c.buf.Emit(OP_PUSH_CONST)
+		c.buf.EmitU32(uint32(val))
+		return nil
+	}
+	if slot, ok := c.defSlots[v.RefID()]; ok {
+		c.buf.Emit(OP_PUSH_LOCAL)
+		c.buf.EmitU8(slot)
+		return nil
+	}
+	return fmt.Errorf("operand is a function argument or global (unsupported until the VM entry ABI passes arguments, see ROADMAP P2.3)")
+}
+
+// emitStoreLocal 弹出栈顶写入槽位。
+func (c *Compiler) emitStoreLocal(slot uint8) {
+	c.buf.Emit(OP_STORE_LOCAL)
+	c.buf.EmitU8(slot)
 }
 
 // icmpOpcode maps an LLVM integer comparison predicate to a VM comparison
@@ -312,36 +336,11 @@ func (c *Compiler) emitJump(op Opcode, target string) {
 	})
 }
 
-// compileValue 将 LLVM Value 编译为值压栈指令
-func (c *Compiler) compileValue(v llvmwrap.Value) {
-	if isConst, val := v.IsConstInt(); isConst {
-		// 常量整数
-		c.buf.Emit(OP_PUSH_CONST)
-		c.buf.EmitU32(uint32(val))
-	} else {
-		// 变量或参数：压入局部变量槽
-		slot := c.allocLocal()
-		c.buf.Emit(OP_PUSH_LOCAL)
-		c.buf.EmitU8(slot)
-	}
-}
-
 // allocLocal 分配局部变量槽
 func (c *Compiler) allocLocal() uint8 {
 	slot := c.nextLocal
 	c.nextLocal++
 	return slot
-}
-
-// getOrAllocExtFunc 获取或分配外部函数 ID
-func (c *Compiler) getOrAllocExtFunc(name string) uint16 {
-	if id, ok := c.extFuncs[name]; ok {
-		return id
-	}
-	id := c.nextExtID
-	c.extFuncs[name] = id
-	c.nextExtID++
-	return id
 }
 
 // GetMapper 返回 opcode 映射器

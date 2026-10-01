@@ -229,6 +229,8 @@ protector -profile full -input app.apk \
   -store-pass-env APK_STORE_PASS -protect-secret-env APK_PROTECT_SECRET
 ```
 
+优先级从强到弱：**子命令强制**（`scan`/`sign` 决定管线形态）→ **显式 flag**（只有实际传入的 flag 才覆盖配置；`-protect=false` 可关闭）→ **`-profile` 预设** → **配置文件**。注意 `sign` 恒关闭保护，`scan` 无需 Android build-tools。
+
 #### 核心参数
 
 | 参数 | 默认值 | 说明 |

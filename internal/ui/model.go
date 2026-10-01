@@ -318,6 +318,7 @@ func (m model) updateReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenForm
 			return m, nil
 		}
+		m.saveState()
 		m.quitMsg = "Configuration written to " + m.cfgTarget
 		return m, tea.Quit
 	}
@@ -405,6 +406,9 @@ func (m *model) buildForm(profile presets.Profile, input string) {
 		m.inputs[i] = ti
 		m.hasInput[i] = true
 	}
+	// keytool 不渲染为字段，但探测结果必须进入 Values：
+	// 否则 ToConfig 恒回退 PATH 裸 keytool，state 也无从记忆。
+	m.form.Values[keyKeytool] = prefill[keyKeytool]
 	m.focus = 0
 	m.formErrs = nil
 }

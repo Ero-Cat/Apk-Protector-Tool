@@ -216,6 +216,38 @@ func execute(mode string, fs *flag.FlagSet, opts *cliOptions) int {
 	}
 
 	// Subcommand intent is strongest: it runs after every override layer.
+	forceMode(mode, cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	tool := app.NewTool(cfg)
+	tool.SkipOutput = mode == "scan" // scan-only：报告即交付物
+	report, err := tool.Run(ctx)
+	if err != nil {
+		log.Fatalf("execution failed: %v", err)
+	}
+
+	if cfg.Reporting.JSON != "" {
+		if err := app.WriteReport(cfg.Reporting.JSON, report); err != nil {
+			log.Fatalf("write report: %v", err)
+		}
+	}
+
+	if tool.SkipOutput {
+		fmt.Printf("Scan complete. Report: %s\\n", cfg.Reporting.JSON)
+		return 0
+	}
+	fmt.Printf("Successfully processed APK. Final artifact: %s\\n", report.FinalAPK)
+	if report.Hashes["sha256"] != "" {
+		fmt.Printf("SHA256: %s\\n", report.Hashes["sha256"])
+	}
+	return 0
+}
+
+// forceMode 在全部覆盖层之后应用子命令的管线形态（子命令意图最强）。
+// scan：仅安全扫描；sign：对齐+签名（验签随 -verify）。
+func forceMode(mode string, cfg *app.Config) {
 	switch mode {
 	case "scan":
 		cfg.Scanning.Enabled = true
@@ -229,27 +261,6 @@ func execute(mode string, fs *flag.FlagSet, opts *cliOptions) int {
 		cfg.Protections = app.ProtectionConfig{Enabled: false}
 		cfg.Reinforce.Enabled = false
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
-	tool := app.NewTool(cfg)
-	report, err := tool.Run(ctx)
-	if err != nil {
-		log.Fatalf("execution failed: %v", err)
-	}
-
-	if cfg.Reporting.JSON != "" {
-		if err := app.WriteReport(cfg.Reporting.JSON, report); err != nil {
-			log.Fatalf("write report: %v", err)
-		}
-	}
-
-	fmt.Printf("Successfully processed APK. Final artifact: %s\\n", report.FinalAPK)
-	if report.Hashes["sha256"] != "" {
-		fmt.Printf("SHA256: %s\\n", report.Hashes["sha256"])
-	}
-	return 0
 }
 
 // lookupEnvValue resolves an env-name flag; an unset variable is a hard error

@@ -42,6 +42,10 @@ func (f *Function) Type() ValueType       { return f.impl.typ() }
 func (f *Function) ReturnType() ValueType { return f.impl.returnType() }
 
 func (bb *BasicBlock) Instructions() []Instruction { return bb.impl.instructions() }
+
+// Terminator returns the basic block's terminating instruction (every
+// well-formed block has one).
+func (bb BasicBlock) Terminator() Instruction { return bb.impl.terminator() }
 func (bb *BasicBlock) AppendInstructionBefore(before Instruction, inst Instruction) {
 	bb.impl.appendInstructionBefore(before, inst)
 }
@@ -58,6 +62,21 @@ func (i *Instruction) ReplaceAllUsesWith(newInst Instruction) {
 	i.impl.replaceAllUsesWith(newInst)
 }
 func (i Instruction) Operands() []Value { return i.impl.operands() }
+
+// SetOperand replaces operand idx of the instruction. Unlike
+// ReplaceAllUsesWith it touches only this instruction, which makes it safe
+// for building wrapping chains (no self-referential cycles).
+func (i Instruction) SetOperand(idx int, v Value) { i.impl.setOperand(idx, v) }
+
+// EraseFromParent removes the instruction from its block and destroys it.
+func (i Instruction) EraseFromParent() { i.impl.eraseFromParent() }
+
+// Verify checks module well-formedness; nil means the module passes the
+// LLVM verifier.
+func (m *Module) Verify() error { return m.impl.verify() }
+
+// String renders the module as textual IR (diagnostics and debugging).
+func (m *Module) String() string { return m.impl.string() }
 
 // CalledValue returns the callee of a call instruction.
 func (i Instruction) CalledValue() Value { return i.impl.calledValue() }

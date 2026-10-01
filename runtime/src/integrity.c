@@ -53,15 +53,6 @@ void goprotect_register_region(uint32_t region_id, uint32_t expected_hash) {
 /**
  * 简单的 CRC32 哈希计算（示例实现）
  */
-static uint32_t simple_hash(const uint8_t* data, size_t len) {
-    uint32_t hash = 0x5a5a5a5a;
-    for (size_t i = 0; i < len; i++) {
-        hash ^= data[i];
-        hash = (hash << 5) | (hash >> 27);
-        hash += data[i];
-    }
-    return hash;
-}
 
 /**
  * 完整性校验钩子实现

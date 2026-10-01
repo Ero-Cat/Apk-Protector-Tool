@@ -229,6 +229,8 @@ protector -profile full -input app.apk \
   -store-pass-env APK_STORE_PASS -protect-secret-env APK_PROTECT_SECRET
 ```
 
+Precedence, strongest first: **subcommand forcing** (`scan`/`sign` shape the pipeline) → **explicit flags** (only flags you actually passed override the config; `-protect=false` disables) → **`-profile` preset** → **config file**. Note that `sign` always disables protections, and `scan` never requires Android build-tools.
+
 #### Core options
 
 | Flag | Default | Description |

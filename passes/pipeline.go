@@ -3,6 +3,7 @@ package passes
 import (
 	"fmt"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/Ero-Cat/Apk-Protector-Tool/config"
@@ -28,6 +29,14 @@ func (p *Pipeline) Run(m *llvmwrap.Module) error {
 	for _, pass := range p.passes {
 		if err := pass.Run(m); err != nil {
 			return fmt.Errorf("%s: %w", pass.Name(), err)
+		}
+		// 每个 Pass 之后跑一次 verifier：损坏的模块在源头点名，
+		// 而不是静默写出非法位码（P4.2 的逐 pass 化）。
+		if err := m.Verify(); err != nil {
+			if path := os.Getenv("GOPROTECT_DUMP_IR"); path != "" {
+				_ = os.WriteFile(path, []byte(m.String()), 0o644)
+			}
+			return fmt.Errorf("module invalid after pass %s: %w", pass.Name(), err)
 		}
 	}
 	return nil
