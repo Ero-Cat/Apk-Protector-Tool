@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="560" viewBox="0 0 800 560" role="img" aria-label="protector CLI demo: hardening run and scan report">
+  <!-- window -->
+  <rect x="0" y="0" width="800" height="560" rx="12" fill="#0D1117"/>
+  <rect x="0" y="0" width="800" height="44" rx="12" fill="#161B22"/>
+  <rect x="0" y="32" width="800" height="12" fill="#161B22"/>
+  <circle cx="24" cy="22" r="6" fill="#FF5F57"/>
+  <circle cx="44" cy="22" r="6" fill="#FEBC2E"/>
+  <circle cx="64" cy="22" r="6" fill="#28C840"/>
+  <text x="400" y="27" text-anchor="middle" fill="#8B949E" font-family="Menlo, Monaco, 'Courier New', monospace" font-size="13">protector — hardening run</text>
+
+  <g font-family="Menlo, Monaco, 'Courier New', monospace" font-size="15" fill="#E6EDF3">
+    <!-- command -->
+    <text x="28" y="82" xml:space="preserve"><tspan fill="#3DDC84">$</tspan> BT=~/Library/Android/sdk/build-tools/36.1.0</text>
+    <text x="28" y="110" xml:space="preserve"><tspan fill="#3DDC84">$</tspan> ./protector \</text>
+    <text x="52" y="138" xml:space="preserve">    -input demo.apk -output dist/demo-protected-full.apk \</text>
+    <text x="52" y="166" xml:space="preserve">    -protect -protect-multi-dex -protect-compress \</text>
+    <text x="52" y="194" xml:space="preserve">    -protect-secret "$APK_PROTECT_SECRET" \</text>
+    <text x="52" y="222" xml:space="preserve">    -zipalign "$BT/zipalign" -report report.json</text>
+
+    <!-- success output -->
+    <text x="28" y="266" fill="#3DDC84">Successfully processed APK. Final artifact: dist/demo-protected-full.apk</text>
+    <text x="28" y="294" fill="#57A773">SHA256: e09eaa0aa3fdf5bd33a3afb6552f79fcc3b023ca2baf06adf1bd0442d80e3cbc</text>
+
+    <!-- scan report -->
+    <text x="28" y="338" xml:space="preserve"><tspan fill="#3DDC84">$</tspan> jq '.scan' report.json</text>
+    <text x="28" y="366" fill="#E6EDF3">{</text>
+    <text x="28" y="394" xml:space="preserve">  <tspan fill="#79C0FF">"anti_environment"</tspan>: [<tspan fill="#FEBC2E">"frida"</tspan>, <tspan fill="#FEBC2E">"magisk"</tspan>, <tspan fill="#FEBC2E">"ro.debuggable"</tspan>, <tspan fill="#FEBC2E">"xposed"</tspan>],</text>
+    <text x="28" y="422" xml:space="preserve">  <tspan fill="#79C0FF">"certificates"</tspan>:     [<tspan fill="#A5D6FF">"assets/keys_backup.pem"</tspan>],</text>
+    <text x="28" y="450" xml:space="preserve">  <tspan fill="#79C0FF">"key_leaks"</tspan>:        [<tspan fill="#FF7B72">"-----BEGIN RSA PRIVATE KEY-----"</tspan>],</text>
+    <text x="28" y="478" xml:space="preserve">  <tspan fill="#79C0FF">"signature"</tspan>:        { <tspan fill="#79C0FF">"has_v2_signature"</tspan>: <tspan fill="#FF7B72">false</tspan>, <tspan fill="#79C0FF">"janus_risk"</tspan>: <tspan fill="#FF7B72">true</tspan> }</text>
+    <text x="28" y="506" fill="#E6EDF3">}</text>
+
+    <text x="28" y="540" fill="#3DDC84">$</text>
+    <rect x="40" y="528" width="9" height="16" fill="#E6EDF3"/>
+  </g>
+</svg>

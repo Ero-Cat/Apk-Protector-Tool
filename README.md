@@ -1,193 +1,275 @@
-# Protector Tool
+<h1 align="center">Apk-Protector-Tool</h1>
 
 <p align="center">
-  <strong>LLVM-Based APK Hardening & IR Obfuscation Toolkit</strong>
+  <img src="docs/assets/logo.svg" width="180" alt="Apk-Protector-Tool logo" />
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go" alt="Go Version">
-  <img src="https://img.shields.io/badge/LLVM-Optional-262D3A?style=flat&logo=llvm" alt="LLVM">
-  <img src="https://img.shields.io/badge/Android-NDK-3DDC84?style=flat&logo=android" alt="Android">
+  <strong>Local-first APK hardening &amp; LLVM IR obfuscation toolkit, written in Go.</strong><br/>
+  Harden, scan, align and sign Android releases — entirely on your machine, no clouds, no uploads.
 </p>
 
----
+<p align="center">
+  <a href="https://github.com/Ero-Cat/Apk-Protector-Tool/actions/workflows/ci.yml"><img src="https://github.com/Ero-Cat/Apk-Protector-Tool/actions/workflows/ci.yml/badge.svg" alt="GitHub Actions CI"></a>
+  <a href="https://github.com/Ero-Cat/Apk-Protector-Tool/releases"><img src="https://img.shields.io/github/v/release/Ero-Cat/Apk-Protector-Tool?display_name=tag" alt="Release"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat&amp;logo=go" alt="Go Version"></a>
+  <a href="https://goreportcard.com/report/github.com/Ero-Cat/Apk-Protector-Tool"><img src="https://goreportcard.com/badge/github.com/Ero-Cat/Apk-Protector-Tool" alt="Go Report Card"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+</p>
 
-## 功能特性
+<p align="center">
+  🇨🇳 <a href="README_zh-CN.md">中文文档</a>&nbsp;&nbsp;·&nbsp;&nbsp;🗺
+  <a href="docs/ROADMAP.md">Roadmap</a>&nbsp;&nbsp;·&nbsp;&nbsp;🎨
+  <a href="docs/design/tui-evaluation.md">TUI design</a>&nbsp;&nbsp;·&nbsp;&nbsp;🐛
+  <a href="https://github.com/Ero-Cat/Apk-Protector-Tool/issues">Report a bug</a>
+</p>
 
-| 模块 | 功能 | 说明 |
-|------|------|------|
-| **APK 加固** | DEX 加密 | AES-GCM + Deflate 压缩 |
-| | 包名随机化 | 混淆原始包名 |
-| | 伪加固标记 | 模拟主流加固特征 |
-| | 自动签名 | zipalign + V1/V2 签名 |
-| **IR 混淆** | 控制流平坦化 | Switch 调度器模式 |
-| | 常量混淆 | 运行时解密 |
-| | 指令替换 | 等价指令变换 |
-| **VMP 虚拟化** | 字节码编译 | IR → 自定义 VM 指令 |
-| | 多 VM 支持 | 分级保护 (normal/sensitive/critical) |
-| | Opcode 随机化 | 每次构建唯一映射 |
-| **安全钩子** | 完整性校验 | `__goprotect_check_integrity` |
-| | 反调试 | `__goprotect_anti_debug` |
+> 💡 Like this project? Please consider giving it a ⭐ — it helps others find it!
 
 ---
 
-## 快速开始
+## 📋 Table of Contents
 
-### 环境要求
+- [⚠️ Disclaimer](#️-disclaimer)
+- [🚀 Quickstart](#-quickstart)
+- [🎬 Demo](#-demo)
+- [✨ Features](#-features)
+- [📖 Usage Manual](#-usage-manual)
+  - [protector — APK hardening CLI](#protector--apk-hardening-cli)
+  - [goprotect — IR obfuscation CLI](#goprotect--ir-obfuscation-cli)
+  - [Configuration files](#configuration-files)
+  - [Runtime integration](#runtime-integration)
+- [🧠 Philosophy — why another protector?](#-philosophy--why-another-protector)
+- [🗺 Roadmap](#-roadmap)
+- [❓ FAQ](#-faq)
+- [🤝 Contributing](#-contributing)
+- [📜 Version history](#-version-history)
+- [📄 License](#-license)
 
-- Go 1.25+
-- Android build-tools (zipalign, apksigner)
-- LLVM (可选，需 `-tags llvm` 编译)
+---
 
-### 编译
+## ⚠️ Disclaimer
+
+This toolkit is intended for **hardening applications you own or are authorized to test** — release engineering, anti-tampering research and authorized security assessments. You are responsible for complying with the laws and platform policies that apply to your app. Don't ship other people's APKs through it.
+
+---
+
+## 🚀 Quickstart
+
+### Prerequisites
+
+| Tool | Required for | Notes |
+|------|--------------|-------|
+| Go 1.25+ | everything | [go.dev/dl](https://go.dev/dl/) |
+| Android build-tools | signing & alignment | provides `zipalign`, `apksigner`, `keytool` ([install via sdkmanager](https://developer.android.com/tools/releases/build-tools)) |
+| LLVM (with C API) | `goprotect` only | build with `-tags llvm`; everything else works without it |
+| Android NDK | C runtime | only when linking `runtime/` into an app |
+
+### Install
 
 ```bash
-# 基础编译
+# install the APK hardening CLI (any Go 1.25+ machine)
+go install github.com/Ero-Cat/Apk-Protector-Tool/cmd/protector@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/Ero-Cat/Apk-Protector-Tool.git
+cd Apk-Protector-Tool
+
+# APK hardening CLI (no external dependencies)
 go build -o dist/protector ./cmd/protector
 
-# 启用 LLVM 支持
-go build -tags llvm -o dist/protector ./cmd/protector
-
-# IR 混淆工具
+# IR obfuscation CLI (requires LLVM with pkg-config support)
 go build -tags llvm -o dist/goprotect ./cmd/goprotect
 ```
 
-### APK 加固示例
+### Your first run
 
 ```bash
-BT=~/Library/Android/sdk/build-tools/36.1.0
-APK_PROTECT_SECRET="${APK_PROTECT_SECRET:?set APK_PROTECT_SECRET}"
-APK_STORE_PASS="${APK_STORE_PASS:?set APK_STORE_PASS}"
-APK_KEY_PASS="${APK_KEY_PASS:-$APK_STORE_PASS}"
-APK_KEY_ALIAS="${APK_KEY_ALIAS:?set APK_KEY_ALIAS}"
+# 1. Pre-flight security scan of a release APK (no changes made)
+protector -input app-release.apk -report dist/report.json
 
-./protector \
+# 2. Full hardening: encrypt DEX, align, sign, verify
+BT=~/Library/Android/sdk/build-tools/36.1.0   # or /path/to/sdk/build-tools/XX.X.X
+
+protector \
   -input app-release.apk \
   -output dist/app-protected.apk \
-  -protect \
-  -protect-random-package \
-  -protect-multi-dex \
-  -protect-compress \
+  -protect -protect-multi-dex -protect-compress -protect-random-package \
   -protect-secret "$APK_PROTECT_SECRET" \
   -zipalign "$BT/zipalign" \
   -apksigner "$BT/apksigner" \
   -keystore sign/release.keystore \
   -store-pass "$APK_STORE_PASS" \
-  -key-pass "$APK_KEY_PASS" \
   -key-alias "$APK_KEY_ALIAS" \
   -verify \
   -report dist/report.json
 ```
 
-### IR 混淆示例
+Everything the pipeline did — scan findings, protection steps, artifacts and SHA-256 — lands in `dist/report.json` for auditing.
 
-```bash
-./goprotect \
-  -config config/example.yml \
-  -input module.bc \
-  -o module_protected.bc
+> Yes, that is a lot of flags. A `protector ui` terminal wizard and `-profile` presets are the top item on the [roadmap](#-roadmap) precisely to make this a 3-step flow.
+
+---
+
+## 🎬 Demo
+
+Real output of a hardening run against a test APK seeded with `frida`/`xposed`/`magisk` strings and a stray private key — the scan catches all of them before the pipeline proceeds:
+
+![protector hardening demo](docs/assets/demo-scan.svg)
+
+The same run produces a machine-readable report:
+
+```json
+{
+  "steps": [
+    { "name": "scan",       "status": "completed" },
+    { "name": "protections", "status": "completed" },
+    { "name": "zipalign",   "status": "completed" }
+  ],
+  "hashes": { "sha256": "e09eaa0aa3fdf5bd33a3afb6552f79fc..." }
+}
 ```
 
 ---
 
-## 项目结构
+## ✨ Features
 
-```
-protector-tool/
-├── cmd/
-│   ├── protector/       # APK 加固 CLI
-│   └── goprotect/       # IR 混淆 CLI
-├── config/              # 配置定义与示例
-├── internal/app/        # APK 处理核心逻辑
-├── passes/              # LLVM Pass 实现
-│   ├── vmp/             # VMP 字节码编译器
-│   ├── virtualize.go    # 虚拟化 Pass
-│   ├── cf_flatten.go    # 控制流平坦化
-│   ├── const_obf.go     # 常量混淆
-│   └── security_hooks.go # 安全钩子
-├── llvmwrap/            # LLVM C API 封装
-├── runtime/             # Android 运行时库
-│   ├── include/         # C 头文件
-│   └── src/             # 实现源码
-├── report/              # 报告生成
-└── docs/                # 文档
-```
+**Maturity labels are honest**: ✅ = stable and covered by tests, 🧪 = experimental / in progress — see the [roadmap](docs/ROADMAP.md) for exactly what remains.
 
----
+### 🔐 APK hardening pipeline — `protector` ✅
 
-## 配置说明
+| Feature | What it does |
+|---------|--------------|
+| Static security scan | Detects hardener fingerprints, embedded APKs/certificates, private-key leaks, anti-environment keywords (frida, xposed, magisk, …), Janus signature risk |
+| DEX encryption | All `classes*.dex` encrypted with AES-256-GCM; optional Deflate pre-compression |
+| Package randomization | Rewrites the manifest package name (same-length) to blur static analysis |
+| Pseudo-hardening markers | Embeds artifacts that mimic mainstream commercial hardeners |
+| Third-party hardener hook | Wraps any external reinforcement CLI into the pipeline with templated paths/env |
+| Automatic zipalign | Auto-enabled when the APK ships native libs; forces stored `resources.arsc` for Android R+ |
+| Signing & verification | V1+V2 signing via `apksigner`, optional `--print-certs` verification, keystore auto-creation via `keytool` |
+| JSON run report | Every step, artifact and hash recorded for CI audit trails |
 
-### YAML 配置示例
+### 🔀 IR obfuscation — `goprotect` 🧪
 
-```yaml
-input: module.bc
-output: module_protected.bc
+| Feature | What it does |
+|---------|--------------|
+| Control-flow flattening | Rewrites functions around a switch-dispatcher state machine |
+| Constant splitting / instruction substitution | Splits constants across arithmetic ops, wraps identities with XOR |
+| Constant obfuscation | Decrypt-stub calls around sensitive literals |
+| Security hooks | Injects anti-debug & integrity-check entry/exit calls |
+| Obfuscation levels | `low` / `medium` / `high` presets tuning ratios and intensity |
 
-passes:
-  cf_flatten: true
-  const_obfuscation: true
-  virtualization: true
-  security_hooks: true
+### 🌀 VMP virtualization — 🧪
 
-obfuscation:
-  level: medium
-  flatten_ratio: 50
-  virtualize_ratio: 30
+| Feature | What it does |
+|---------|--------------|
+| Bytecode compiler | Compiles selected functions from LLVM IR into a custom VM ISA |
+| Multi-VM tiering | Split VMs (e.g. `vm_a`/`vm_b`) mapped to `normal`/`sensitive`/`critical` function tiers |
+| Opcode randomization | Per-build randomized opcode map |
+| Bytecode encryption | Encrypted program bytes with per-VM keys |
 
-vmp:
-  enable_multi_vm: true
-  static_key: "${GOPROTECT_STATIC_KEY}"
-  vms:
-    - name: vm_a
-      isa: A
-    - name: vm_b
-      isa: B
-  levels:
-    normal: vm_a
-    sensitive: vm_b
-    critical: vm_b
-```
+### ⚙️ Android C runtime — 🧪
 
-### CLI 参数速查
-
-| 参数 | 说明 |
-|------|------|
-| `-config` | 配置文件路径 |
-| `-input` | 输入 APK/BC 文件 |
-| `-output` | 输出文件路径 |
-| `-protect` | 启用 APK 保护 |
-| `-protect-compress` | 压缩后加密 DEX |
-| `-protect-random-package` | 随机化包名 |
-| `-protect-multi-dex` | 加密所有 DEX |
-| `-zipalign` | zipalign 路径 |
-| `-apksigner` | apksigner 路径 |
-| `-keystore` | 签名密钥库 |
-| `-verify` | 验证签名 |
-| `-report` | 报告输出路径 |
+`runtime/` provides the NDK-buildable skeleton: VM entry points, anti-debug and integrity hooks — cross-compiled via CMake toolchain. See [Runtime integration](#runtime-integration).
 
 ---
 
-## 运行时集成
+## 📖 Usage Manual
 
-VMP 保护的函数需要运行时解释器支持。项目提供 `runtime/` 框架：
+### `protector` — APK hardening CLI
+
+```
+protector -input <app.apk> [options]
+```
+
+#### Core options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-input` | — | Source APK (required, or set `input_apk` in config) |
+| `-config` | — | Path to JSON/YAML config file |
+| `-output` | `dist/<name>-protected.apk` | Final artifact path |
+| `-report` | — | Where to write the JSON run report |
+| `-workdir` | OS temp | Root for per-run temp directories |
+| `-skip-scan` | off | Disable the pre-flight security scan |
+
+#### Protection options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-protect` | off | Master switch for built-in protections |
+| `-protect-multi-dex` | off | Encrypt **all** `classes*.dex` |
+| `-protect-dex` | off | Encrypt only primary `classes.dex` |
+| `-protect-compress` | off | Deflate DEX before encrypting (smaller output) |
+| `-protect-random-package` | off | Randomize the manifest package name |
+| `-protect-package-prefix` | `com.protector` | Prefix for the randomized package |
+| `-protect-secret` | random | Secret for AES key derivation |
+| `-protect-pseudo` | off | Embed pseudo-hardening artifacts |
+
+#### Signing & alignment options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-zipalign` | `zipalign` on PATH | zipalign binary; setting it enables alignment |
+| `-apksigner` | `apksigner` on PATH | apksigner binary; setting it enables signing |
+| `-keystore` | — | Keystore for V1+V2 signing |
+| `-store-pass` | — | Keystore password |
+| `-key-pass` | = store-pass | Key password |
+| `-key-alias` | — | Signing key alias |
+| `-verify` | off | Run `apksigner verify --print-certs` after signing |
+| `-create-keystore` | off | Auto-generate a keystore via `keytool` |
+| `-keytool` | `keytool` on PATH | keytool binary for auto-generation |
+| `-sign-arg` | — | Extra raw args appended to apksigner (repeatable) |
+
+#### Third-party hardener options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-reinforce-command` | — | External hardener CLI run before signing |
+| `-reinforce-output` | — | Expected output APK of the hardener |
+| `-reinforce-arg` | — | Argument passed to the hardener (repeatable; supports `{{input_apk}}`, `{{output_apk}}`, `{{work_dir}}`, `{{ts}}` templates) |
+| `-reinforce-env` | — | `KEY=VALUE` env for the hardener (repeatable) |
+
+### `goprotect` — IR obfuscation CLI
+
+```
+goprotect -input module.bc -config config/example.yml -o module_protected.bc
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-input` | — | Input LLVM bitcode (`.bc`; `.ll` planned) |
+| `-config` | — | JSON/YAML config — see `config/example.yml` |
+| `-o` | `obf-<name>.bc` | Output bitcode path |
+| `-level` | from config | Override obfuscation level: `low` / `medium` / `high` |
+| `-dump-cfg` | off | DOT control-flow dumps before/after passes (stub — see roadmap) |
+
+Deep dive: [docs/goprotect.md](docs/goprotect.md) (Chinese).
+
+### Configuration files
+
+Both CLIs accept JSON **or** YAML configs. Relative paths inside a config resolve against the config file's own directory, `~/` is expanded, and bare binary names fall back to `PATH` lookup.
+
+- [`config.json.example`](config.json.example) — full `protector` configuration (protections, scan, reinforce, zipalign, signing incl. keystore auto-creation)
+- [`config/example.yml`](config/example.yml) — full `goprotect` configuration (passes, levels, multi-VM setup)
+
+Precedence: CLI flags switch options **on** over config values; the config file is the baseline. Note that `${VAR}` strings in configs are currently **not** expanded — wire real secrets via flags/env until [roadmap item P0.3](docs/ROADMAP.md) lands.
+
+### Runtime integration
+
+VMP-protected functions need the runtime interpreter. The repo ships the C skeleton:
 
 ```c
-// 完整性校验钩子
-void __goprotect_check_integrity(uint32_t region_id);
-
-// 反调试钩子
-void __goprotect_anti_debug(void);
-
-// VM 入口点
-void __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode);
-void __goprotect_vm_entry_encrypted_vm_b(const uint8_t* bytecode);
+void __goprotect_check_integrity(uint32_t region_id); // integrity hook
+void __goprotect_anti_debug(void);                    // anti-debug hook
+void __goprotect_vm_entry_encrypted_vm_a(const uint8_t* bytecode); // VM entry
 ```
 
-### 编译运行时库
-
 ```bash
-cd runtime
-mkdir build && cd build
+cd runtime && mkdir build && cd build
 cmake -DANDROID_ABI=arm64-v8a \
       -DANDROID_NDK=/path/to/ndk \
       -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
@@ -195,44 +277,91 @@ cmake -DANDROID_ABI=arm64-v8a \
 make
 ```
 
+> Status: honest answer — the runtime currently executes bytecode without decryption and integrity checks are placeholders. Full wiring is tracked as [roadmap P1/P3](docs/ROADMAP.md).
+
 ---
 
-## 测试
+## 🧠 Philosophy — why another protector?
+
+Commercial APK hardeners are black boxes that phone home; open-source ones usually cover only one layer. This project takes a different stance:
+
+1. **Local-first, always.** Your APK, your keystore and your secrets never leave the machine. No telemetry, no cloud queue, no vendor lock-in. If you can run `go build`, you can run the whole pipeline.
+2. **Config-as-code.** The entire pipeline is a JSON/YAML file with a JSON report of everything that happened — reviewable in a PR, replayable in CI, auditable after the fact.
+3. **Two layers, one repo.** `protector` hardens the APK shell (encrypt, align, sign); `goprotect` obfuscates at the LLVM IR level before code is even compiled. Most tools pick one layer; attackers use both.
+4. **Graceful degradation.** The `llvmwrap` mock lets the whole repo build and test on machines without LLVM — contributors aren't blocked on a toolchain install.
+
+---
+
+## 🗺 Roadmap
+
+The full plan — with per-item status, code evidence and acceptance criteria — lives in [docs/ROADMAP.md](docs/ROADMAP.md). Summary:
+
+| Phase | Theme | Highlight items |
+|-------|-------|-----------------|
+| **P0** | Hardening UX & config safety | `protector ui` TUI wizard, `-profile` presets, `${VAR}` env expansion, env-based secret flags |
+| **P1** | VMP end-to-end | Export opcode map to metadata, implement bytecode decryption, fix branch/call compilation |
+| **P2** | Pass correctness | Real terminator rewriting in cf-flatten, literal encryption in const-obf, `.ll` input, DOT dumps |
+| **P3** | Android runtime | Real integrity hashing, Frida port detection, DEX loader/decryptor |
+| **P4** | Test infrastructure | `CommandRunner` mocking, LLVM-tagged integration tests |
+
+---
+
+## ❓ FAQ
+
+**Do I need LLVM installed?**
+No. LLVM is only required to build/run `goprotect` (`go build -tags llvm`). The `protector` APK pipeline is pure Go plus the Android build-tools binaries.
+
+**How do encrypted DEX files actually run?**
+They don't — not yet, out of the box. The pipeline encrypts DEX into `assets/protector/` and writes metadata, but the Android-side loader/decryptor is part of the experimental runtime work (roadmap P3). Today, treat DEX encryption as a building block, and rely on scan + package randomization + signing for release hygiene.
+
+**Which signature schemes are supported?**
+V1 + V2 via `apksigner` (V1/V2 are force-enabled). V3/V4 support is not implemented.
+
+**`INSTALL_FAILED_INVALID_APK` when installing the output?**
+Make sure alignment and signing ran — the usual cause is skipping `-zipalign`/`-apksigner`/`-keystore`.
+
+**`apksigner: executable file not found`?**
+Install Android build-tools via `sdkmanager "build-tools;36.1.0"` or pass explicit paths via `-apksigner`/`-zipalign`/`keytool`.
+
+**Output APK too large?**
+Add `-protect-compress` to Deflate before encrypting.
+
+**Android 11+ (R) install error −124?**
+Fixed — `resources.arsc` and `lib/` entries are force-stored uncompressed, as required since Android R.
+
+**Is this production-ready?**
+The `protector` pipeline is stable and tested. `goprotect`/VMP/runtime are experimental — check the maturity labels in [Features](#-features) and the roadmap before relying on them.
+
+---
+
+## 🤝 Contributing
 
 ```bash
-go test ./...
-
-# 输出示例：
-# ok  protector-tool/config       5 tests
-# ok  protector-tool/passes       6 tests
-# ok  protector-tool/passes/vmp   5 tests
+go vet ./...          # static analysis
+gofmt -w .            # formatting (CI enforces it)
+go test ./...         # run the test suite
 ```
 
----
+- Follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:` …), imperative subject ≤ 70 chars.
+- Tests are stdlib `testing`, table-driven; external binaries are mocked.
+- Repo conventions for AI-assisted development live in [`AGENTS.md`](AGENTS.md) and `.agent/` (rules, workflows, skills).
 
-## 常见问题
-
-| 问题 | 解决方案 |
-|------|----------|
-| `INSTALL_FAILED_INVALID_APK` | 确保启用 zipalign 和签名 |
-| 找不到 apksigner | 安装 Android build-tools |
-| APK 体积过大 | 启用 `-protect-compress` |
-| Android 11+ 报错 -124 | 已修复，resources.arsc 强制不压缩 |
+Bug reports and PRs are welcome at [github.com/Ero-Cat/Apk-Protector-Tool](https://github.com/Ero-Cat/Apk-Protector-Tool).
 
 ---
 
-## 版本历史
+## 📜 Version history
 
-| 版本 | 更新内容 |
-|------|----------|
-| **v1.4** | VMP 字节码编译器、控制流平坦化重写、运行时库框架、单元测试 |
-| **v1.3** | 修复 Android R+ 安装问题，resources.arsc 对齐 |
-| **v1.2** | 多 VM 随机化 VMP、字节码加密、分级保护 |
-| **v1.1** | DEX 压缩加密、体积优化 |
-| **v1.0** | 基础加固、签名、ADB 验证 |
+| Version | Changes |
+|---------|---------|
+| **v1.4** | VMP bytecode compiler, control-flow flattening rewrite, runtime library skeleton, unit tests |
+| **v1.3** | Fix Android R+ install failures, `resources.arsc` stored uncompressed |
+| **v1.2** | Multi-VM randomized VMP, bytecode encryption, tiered protection |
+| **v1.1** | DEX compression + encryption, size optimization |
+| **v1.0** | Baseline hardening, signing, verification |
 
 ---
 
-## License
+## 📄 License
 
-MIT License
+[MIT](LICENSE) © Ero-Cat

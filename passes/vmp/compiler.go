@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"strings"
 
-	"protector-tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
 )
 
 // Compiler 将 LLVM IR 函数编译为 VM 字节码

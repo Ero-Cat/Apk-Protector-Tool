@@ -41,6 +41,9 @@ report_text.txt
 .env
 *.log
 
+# Local agent session artifacts
+.zcode/
+
 # Config samples
 config.json
 *.local.json

@@ -1,9 +1,9 @@
 package passes
 
 import (
-	"protector-tool/config"
-	"protector-tool/llvmwrap"
-	"protector-tool/report"
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 )
 
 // EntryExitPass：在函数入口/出口插入预留钩子，供运行时做日志或校验。

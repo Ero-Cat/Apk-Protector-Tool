@@ -1,10 +1,10 @@
 package passes
 
 import (
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 	"math/rand"
-	"protector-tool/config"
-	"protector-tool/llvmwrap"
-	"protector-tool/report"
 )
 
 // ConstSplitPass：把整型立即数拆成多步加法，弱化静态特征。

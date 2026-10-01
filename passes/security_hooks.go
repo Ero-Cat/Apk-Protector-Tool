@@ -1,9 +1,9 @@
 package passes
 
 import (
-	"protector-tool/config"
-	"protector-tool/llvmwrap"
-	"protector-tool/report"
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 )
 
 // SecurityHooksPass：在关键函数入口插入完整性与反调试钩子，实际实现由运行时提供。

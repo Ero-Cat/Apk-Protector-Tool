@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"math/rand"
 
-	"protector-tool/config"
-	"protector-tool/llvmwrap"
-	"protector-tool/report"
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 )
 
 // CFFlattenPass：实现调度器式控制流平坦化，将函数的控制流图转换为单一 switch 调度循环。

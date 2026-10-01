@@ -5,9 +5,9 @@ import (
 	"math/rand"
 	"time"
 
-	"protector-tool/config"
-	"protector-tool/llvmwrap"
-	"protector-tool/report"
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 )
 
 // Pass 定义：对模块进行一次 IR 变换。

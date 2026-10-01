@@ -10,7 +10,7 @@ trigger: always_on
 
 ### 模块管理
 ```go
-module protector-tool
+module github.com/Ero-Cat/Apk-Protector-Tool
 
 go 1.25
 

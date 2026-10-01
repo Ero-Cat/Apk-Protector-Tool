@@ -4,8 +4,8 @@ import (
 	"math/rand"
 	"testing"
 
-	"protector-tool/config"
-	"protector-tool/report"
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 )
 
 func TestBuildPipeline(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"log"
 	"path/filepath"
 
-	"protector-tool/config"
-	"protector-tool/llvmwrap"
-	"protector-tool/passes"
-	"protector-tool/report"
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/passes"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 )
 
 func main() {

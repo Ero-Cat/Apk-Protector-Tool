@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"math/rand"
 
-	"protector-tool/config"
-	"protector-tool/llvmwrap"
-	"protector-tool/passes/vmp"
-	"protector-tool/report"
+	"github.com/Ero-Cat/Apk-Protector-Tool/config"
+	"github.com/Ero-Cat/Apk-Protector-Tool/llvmwrap"
+	"github.com/Ero-Cat/Apk-Protector-Tool/passes/vmp"
+	"github.com/Ero-Cat/Apk-Protector-Tool/report"
 )
 
 // VirtualizePass：将部分 void 函数替换为 VM 入口跳板，并把生成的字节码以全局数组形式存入模块。

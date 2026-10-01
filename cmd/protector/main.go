@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"protector-tool/internal/app"
+	"github.com/Ero-Cat/Apk-Protector-Tool/internal/app"
 )
 
 type sliceFlag []string
